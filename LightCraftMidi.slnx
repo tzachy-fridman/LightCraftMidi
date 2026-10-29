@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LightCraftMidi.Core/LightCraftMidi.Core.csproj" />
+    <Project Path="src/LightCraftMidi/LightCraftMidi.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LightCraftMidi.Tests/LightCraftMidi.Tests.csproj" />
+  </Folder>
+</Solution>

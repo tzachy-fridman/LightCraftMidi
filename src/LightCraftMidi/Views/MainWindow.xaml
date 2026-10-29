@@ -1,0 +1,466 @@
+<Window x:Class="LightCraftMidi.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:LightCraftMidi.ViewModels"
+        d:DataContext="{d:DesignInstance vm:MainViewModel}"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="LightCraft MIDI — Configuration" Height="820" Width="1360" MinHeight="600" MinWidth="1000"
+        WindowStartupLocation="CenterScreen" FontSize="13">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <Style x:Key="StatusDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="11" />
+            <Setter Property="Height" Value="11" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Fill" Value="#D9534F" />
+        </Style>
+        <Style x:Key="Header" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#666" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="MinHeight" Value="26" />
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="GroupBox">
+            <Setter Property="Padding" Value="6" />
+        </Style>
+        <DataTemplate x:Key="GroupHeader">
+            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#2C5D9E" Margin="2,8,0,2" />
+        </DataTemplate>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Profile toolbar -->
+        <Border DockPanel.Dock="Top" Background="#F3F4F6" BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="12,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Profile" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,14,0" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <ComboBox Width="220" ItemsSource="{Binding ProfileNames}" SelectedItem="{Binding SelectedProfileName}" Margin="0,0,8,0" />
+                    <TextBlock Text="{Binding ActiveProfileText}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Button Content="New…" Command="{Binding NewProfileCommand}" />
+                    <Button Content="Duplicate…" Command="{Binding DuplicateProfileCommand}" />
+                    <Button Content="Rename…" Command="{Binding RenameProfileCommand}" />
+                    <Button Content="Delete" Command="{Binding DeleteProfileCommand}" />
+                    <ToggleButton IsChecked="{Binding MappingEnabled}" Width="38" Height="30" Margin="10,0"
+                                  AutomationProperties.AutomationId="MappingEnabledToggle"
+                                  AutomationProperties.Name="Mapping enabled">
+                        <ToggleButton.Style>
+                            <Style TargetType="ToggleButton">
+                                <Setter Property="ToolTip" Value="Mapping paused — click to enable" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter Property="ToolTip" Value="Mapping enabled — click to pause" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ToggleButton.Style>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="18">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="&#xE768;" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding MappingEnabled}" Value="True">
+                                            <Setter Property="Text" Value="&#xE769;" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </ToggleButton>
+                    <Button Content="Settings…" Click="OpenSettings" AutomationProperties.AutomationId="OpenSettings" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse>
+                        <Ellipse.Style>
+                            <Style TargetType="Ellipse" BasedOn="{StaticResource StatusDot}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding LightCraftConnected}" Value="True">
+                                        <Setter Property="Fill" Value="#3BA55C" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
+                    <TextBlock Text="{Binding LightCraftStatus}" />
+                </StackPanel>
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse>
+                        <Ellipse.Style>
+                            <Style TargetType="Ellipse" BasedOn="{StaticResource StatusDot}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding MidiConnected}" Value="True">
+                                        <Setter Property="Fill" Value="#3BA55C" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
+                    <TextBlock Text="{Binding MidiStatus}" />
+                </StackPanel>
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <TextBlock Text="{Binding DiscoverySummary}" />
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <TextBlock Text="{Binding LastMessage}" Foreground="#A94442" />
+            </StatusBarItem>
+        </StatusBar>
+
+        <Grid Margin="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330" MinWidth="240" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="*" MinWidth="380" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="400" MinWidth="280" />
+            </Grid.ColumnDefinitions>
+
+            <!-- MIDI controller side -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel>
+                    <TextBlock Text="MIDI controller" Style="{StaticResource Header}" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6"
+                               Text="Move every knob, fader and button once to detect it. Select a control and use the arrow to assign its MIDI source." />
+                </StackPanel>
+                <ListView Grid.Row="1" ItemsSource="{Binding DetectedControls}" SelectedItem="{Binding SelectedDetected}">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <EventSetter Event="MouseDoubleClick" Handler="AssignItemDoubleClick" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,2">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding LastValue}" Foreground="#2C5D9E" FontFamily="Consolas" />
+                                    <TextBlock Text="{Binding SourceText}" FontWeight="SemiBold" />
+                                </DockPanel>
+                                <TextBlock Text="{Binding Kind}" Foreground="#555" FontSize="12" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12" Foreground="#3BA55C" TextWrapping="Wrap">
+                                    <Run Text="→" /><Run Text="{Binding MappedTo, Mode=OneWay, TargetNullValue='not mapped'}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button Content="Clear" Command="{Binding ClearMonitorCommand}" />
+                </StackPanel>
+                <GridSplitter Grid.Row="3" HorizontalAlignment="Stretch" Background="Transparent" />
+                <DockPanel Grid.Row="4">
+                    <TextBlock DockPanel.Dock="Top" Text="MIDI monitor" Style="{StaticResource Header}" Margin="0,4,0,4" />
+                    <ListView ItemsSource="{Binding Monitor}" FontFamily="Consolas" FontSize="12">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Time" Width="90" DisplayMemberBinding="{Binding Time}" />
+                                <GridViewColumn Header="Message" Width="160" DisplayMemberBinding="{Binding Message}" />
+                                <GridViewColumn Header="Action" Width="200" DisplayMemberBinding="{Binding Result}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </DockPanel>
+            </Grid>
+
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- Mappings -->
+            <Grid Grid.Column="2" Margin="6,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Mappings" Style="{StaticResource Header}" />
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
+                    <Button Content="Add" Command="{Binding AddMappingCommand}"
+                            ToolTip="Add a mapping using the selected MIDI control and the selected target in the current tab" />
+                    <Button Command="{Binding LearnCommand}" ToolTip="Re-assign the MIDI source of the selected mapping">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                <Setter Property="Content" Value="Learn" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLearning}" Value="True">
+                                        <Setter Property="Content" Value="Cancel learn" />
+                                        <Setter Property="Background" Value="#FFE8A6" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="Remove" Command="{Binding RemoveMappingCommand}" />
+                    <TextBlock Text="Learning — move a control on your MIDI device…" VerticalAlignment="Center" Foreground="#B8860B" FontWeight="SemiBold"
+                               Visibility="{Binding IsLearning, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+
+                <DockPanel Grid.Row="2">
+                    <Button DockPanel.Dock="Left" Content="→" FontSize="30" Width="46" Height="76"
+                            VerticalAlignment="Center" Margin="0,0,6,0" Focusable="False"
+                            Command="{Binding MapDetectedCommand}" ToolTip="Assign selected MIDI source"
+                            AutomationProperties.Name="Assign selected MIDI source" />
+                    <Button DockPanel.Dock="Right" Content="←" FontSize="30" Width="46" Height="76"
+                            VerticalAlignment="Center" Margin="6,0,0,0" Focusable="False"
+                            Command="{Binding AssignTargetCommand}" ToolTip="Assign selected LightCraft target"
+                            AutomationProperties.Name="Assign selected LightCraft target" />
+                <DataGrid x:Name="MappingList" ItemsSource="{Binding MappingsView}"
+                          SelectedItem="{Binding SelectedMapping, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          IsSynchronizedWithCurrentItem="False" SelectionUnit="FullRow"
+                          AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column" SelectionMode="Single"
+                          GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEE" RowHeight="26" CanUserAddRows="False"
+                          CanUserSortColumns="False">
+                    <DataGrid.Resources>
+                        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}"
+                                         Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+                        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}"
+                                         Color="{DynamicResource {x:Static SystemColors.HighlightTextColorKey}}" />
+                    </DataGrid.Resources>
+                    <DataGrid.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <Border Background="#E8EDF4" BorderBrush="#AAB8CA" BorderThickness="0,1,0,1" Padding="8,6" Margin="0,4,0,2">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#2C5D9E" />
+                                    </Border>
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </DataGrid.GroupStyle>
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                    <Setter Property="Background" Value="#E3F4E7" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsLearning}" Value="True">
+                                    <Setter Property="Background" Value="#FFF4CC" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="" Width="24">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="⚠" Foreground="#D08B00" HorizontalAlignment="Center" ToolTip="{Binding Warning}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Warning}" Value="{x:Null}">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="MIDI source" Binding="{Binding SourceText}" Width="*" />
+                        <DataGridTextColumn Header="Type" Binding="{Binding KindText}" Width="75" />
+                        <DataGridTextColumn Header="LightCraft target" Binding="{Binding TargetText}" Width="1.3*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                </DockPanel>
+
+                <!-- Mapping editor -->
+                <GroupBox Grid.Row="3" Header="Selected mapping" Margin="0,8,0,0"
+                          DataContext="{Binding SelectedMapping}" IsEnabled="{Binding Converter={x:Static vm:NotNullConverter.Instance}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Text="MIDI source" VerticalAlignment="Center" Margin="0,0,10,4" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Channel" VerticalAlignment="Center" Margin="0,0,4,0" />
+                            <ComboBox Width="62" DisplayMemberPath="Name" SelectedValuePath="Value"
+                                      ItemsSource="{Binding DataContext.Channels, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      SelectedValue="{Binding Channel}" />
+                            <TextBlock Text="Type" VerticalAlignment="Center" Margin="10,0,4,0" />
+                            <ComboBox Width="120" ItemsSource="{Binding DataContext.MessageTypes, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      SelectedItem="{Binding MessageType}" />
+                            <TextBlock Text="Number" VerticalAlignment="Center" Margin="10,0,4,0"
+                                       Visibility="{Binding NeedsNumber, Converter={StaticResource BoolToVis}}" />
+                            <TextBox Width="50" Text="{Binding Number, UpdateSourceTrigger=LostFocus}"
+                                     Visibility="{Binding NeedsNumber, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="1" Text="Target" VerticalAlignment="Center" Margin="0,0,10,4" />
+                        <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,4">
+                            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap">
+                                <Run Text="{Binding TargetText, Mode=OneWay}" />
+                                <Run Text="{Binding TargetId, Mode=OneWay, StringFormat='  ({0})'}" Foreground="#777" FontWeight="Normal" />
+                            </TextBlock>
+                        </StackPanel>
+
+                        <!-- Develop control options -->
+                        <TextBlock Grid.Row="2" Text="Slider" VerticalAlignment="Center" Margin="0,0,10,4"
+                                   Visibility="{Binding IsControl, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}" />
+                        <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,4" Visibility="{Binding IsControl, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Range" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                <TextBox Width="70" Text="{Binding RangeMin, TargetNullValue='', UpdateSourceTrigger=LostFocus}" ToolTip="Leave empty for the control's minimum" />
+                                <TextBlock Text="to" VerticalAlignment="Center" Margin="4,0" />
+                                <TextBox Width="70" Text="{Binding RangeMax, TargetNullValue='', UpdateSourceTrigger=LostFocus}" ToolTip="Leave empty for the control's maximum" />
+                                <CheckBox Content="Invert" VerticalAlignment="Center" Margin="12,0,0,0" IsChecked="{Binding Invert}" />
+                                <CheckBox Content="Feedback" VerticalAlignment="Center" Margin="12,0,0,0" IsChecked="{Binding Feedback}"
+                                          ToolTip="Send the current value back to this control (motor fader / LED ring)" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding RangeHint}" Style="{StaticResource Hint}" />
+                        </StackPanel>
+
+                        <!-- Command options -->
+                        <TextBlock Grid.Row="2" Text="Command" VerticalAlignment="Top" Margin="0,4,10,4"
+                                   Visibility="{Binding IsTriggerTarget, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}" />
+                        <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,4" Visibility="{Binding IsTriggerTarget, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <TextBlock Text="Trigger" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                <ComboBox Width="130" ItemsSource="{Binding DataContext.Triggers, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          SelectedItem="{Binding Trigger}"
+                                          ToolTip="OnPress: fire when pressed. OnAnyChange: fire on every message (latching buttons)." />
+                                <TextBlock Text="Params (JSON)" VerticalAlignment="Center" Margin="10,0,4,0" Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
+                                <TextBox MinWidth="180" FontFamily="Consolas" Text="{Binding CommandParams, UpdateSourceTrigger=LostFocus}" Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding ParamsHint}" Style="{StaticResource Hint}"
+                                       Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="4" Grid.ColumnSpan="2" Text="{Binding Warning}" Foreground="#B35C00" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    </Grid>
+                </GroupBox>
+            </Grid>
+
+            <GridSplitter Grid.Column="3" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- LightCraft side -->
+            <DockPanel Grid.Column="4">
+                <DockPanel DockPanel.Dock="Top">
+                    <Button DockPanel.Dock="Right" Content="↻ Discover" Margin="0" Command="{Binding RefreshDiscoveryCommand}"
+                            ToolTip="Re-read controls and commands from LightCraft" />
+                    <TextBlock Text="LightCraft" Style="{StaticResource Header}" />
+                </DockPanel>
+                <TextBox DockPanel.Dock="Top" Margin="0,0,0,6" Text="{Binding TargetSearch, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="Search controls and commands (e.g. 'exposure', 'rate', 'next')" />
+                <TabControl SelectedIndex="{Binding TargetTabIndex}">
+                    <!-- Profile targets are local mapper commands, independent of LightCraft discovery. -->
+                    <TabItem Header="Knobs">
+                        <DockPanel>
+                            <ListView ItemsSource="{Binding ControlsView}" SelectedItem="{Binding SelectedControl}" BorderThickness="0">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <EventSetter Event="MouseDoubleClick" Handler="AssignItemDoubleClick" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.GroupStyle>
+                                    <GroupStyle HeaderTemplate="{StaticResource GroupHeader}" />
+                                </ListView.GroupStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="6,1">
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding RangeText}" Foreground="#777" FontFamily="Consolas" FontSize="12" Margin="10,0,0,0" />
+                                            <TextBlock Text="{Binding Label}" ToolTip="{Binding Id}" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </DockPanel>
+                    </TabItem>
+                    <TabItem Header="Commands">
+                        <DockPanel>
+                            <DockPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                                <CheckBox Content="Show all" VerticalAlignment="Center" HorizontalAlignment="Right" IsChecked="{Binding ShowAllCommands}"
+                                          ToolTip="Also show automation/query commands that are not in a menu" />
+                            </DockPanel>
+                            <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,4,0,0"
+                                       Visibility="{Binding SelectedCommandHasParams, Converter={StaticResource BoolToVis}}"
+                                       Text="{Binding SelectedCommand.ParamsDoc, StringFormat='Params: {0}'}" />
+                            <ListView ItemsSource="{Binding CommandsView}" SelectedItem="{Binding SelectedCommand}" BorderThickness="0">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <EventSetter Event="MouseDoubleClick" Handler="AssignItemDoubleClick" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.GroupStyle>
+                                    <GroupStyle HeaderTemplate="{StaticResource GroupHeader}" />
+                                </ListView.GroupStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="6,1" ToolTip="{Binding Id}">
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Shortcut}" Foreground="#777" FontSize="12" Margin="10,0,0,0" />
+                                            <TextBlock>
+                                                <Run Text="{Binding Label, Mode=OneWay}" />
+                                                <Run Text="{Binding MenuPath, Mode=OneWay, StringFormat='  {0}'}" Foreground="#999" FontSize="11" />
+                                            </TextBlock>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </DockPanel>
+                    </TabItem>
+                    <TabItem Header="Profiles">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="6"
+                                       Text="Assigning a profile-switch command automatically moves the mapping into the Global mappings group at the top of the list. Global mappings stay active alongside the selected profile." />
+                            <ListBox ItemsSource="{Binding SwitchProfileNames}" SelectedItem="{Binding SelectedSwitchProfileName}">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <EventSetter Event="MouseDoubleClick" Handler="AssignItemDoubleClick" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                            </ListBox>
+                        </DockPanel>
+                    </TabItem>
+                </TabControl>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

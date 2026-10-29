@@ -1,0 +1,53 @@
+<Window x:Class="LightCraftMidi.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="LightCraft MIDI Settings" Width="510" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" FontSize="13">
+    <Window.Resources>
+        <Style TargetType="GroupBox">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="MinHeight" Value="28" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,5" />
+        </Style>
+    </Window.Resources>
+    <StackPanel Margin="16">
+        <GroupBox Header="LightCraft connection">
+            <StackPanel>
+                <TextBlock Text="Host" Margin="0,0,0,4" />
+                <TextBox Text="{Binding LightCraftHost, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="LightCraftHost" />
+                <TextBlock Text="Port" Margin="0,10,0,4" />
+                <TextBox Text="{Binding Port, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.AutomationId="LightCraftPort" />
+                <Button Content="Connect" Command="{Binding ApplyConnectionCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                <TextBlock Text="Start LightCraft with: lightcraft --control 7980" Foreground="#666" Margin="0,8,0,0" />
+            </StackPanel>
+        </GroupBox>
+        <GroupBox Header="MIDI connection">
+            <StackPanel>
+                <TextBlock Text="{Binding ActiveProfileText}" Foreground="#666" Margin="0,0,0,8" />
+                <TextBlock Text="Input" Margin="0,0,0,4" />
+                <ComboBox ItemsSource="{Binding InputDevices}" SelectedItem="{Binding SelectedInput}" AutomationProperties.AutomationId="MidiInput" />
+                <TextBlock Text="Output (feedback)" Margin="0,10,0,4" />
+                <ComboBox ItemsSource="{Binding OutputDevices}" SelectedItem="{Binding SelectedOutput}" AutomationProperties.AutomationId="MidiOutput" />
+                <CheckBox Content="Send feedback (motor faders / LED rings)" IsChecked="{Binding FeedbackEnabled}" Margin="0,12,0,0" />
+                <Button Content="Rescan MIDI devices" Command="{Binding RefreshDevicesCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
+            </StackPanel>
+        </GroupBox>
+        <GroupBox Header="Startup">
+            <CheckBox Content="Hide window on start" IsChecked="{Binding HideWindowOnStart}"
+                      AutomationProperties.AutomationId="HideWindowOnStart"
+                      ToolTip="Start in the tray. Double-click the tray icon to open configuration." />
+        </GroupBox>
+        <TextBlock Text="MIDI and startup changes are saved immediately. Click Connect to apply LightCraft connection changes."
+                   TextWrapping="Wrap" Foreground="#666" Margin="0,0,0,12" />
+        <Button Content="Close" IsCancel="True" HorizontalAlignment="Right" MinWidth="85" />
+    </StackPanel>
+</Window>
