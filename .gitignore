@@ -9,3 +9,4 @@ TestResults/
 *.p12
 .env
 .env.*
+artifacts/

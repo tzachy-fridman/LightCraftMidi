@@ -35,6 +35,51 @@ on first launch. Disable it to open configuration at startup, or pass `--show` f
 a one-time override. The icon-only play/pause toggle in the main toolbar enables
 or pauses mapping; its tooltip shows the current state.
 
+## Windows installer (MSIX)
+
+### GitHub Actions
+
+The **Build, test and package** workflow runs on pushes to `main`, pull requests,
+and manually from the repository's **Actions** tab. It uses a Windows runner with
+.NET 10 to build the solution, run all tests, and create the self-contained x64 MSIX.
+Packaging and installer upload only run after successful build and tests.
+
+Download the `LightCraftMidi-<version>-win-x64-unsigned` artifact from the completed
+run for the MSIX and checksum. Test results are uploaded separately, including on
+test failures. Installer artifacts are retained for 30 days; test results for 14 days.
+Manual runs accept a four-part package version (default `1.0.0.0`).
+Packages remain unsigned; no signing keys or repository secrets are required.
+
+### Local packaging
+
+Build a self-contained Windows x64 package (no separate .NET runtime installation):
+
+```powershell
+.\packaging\Build-Msix.ps1
+```
+
+Requires the .NET 10 SDK and the Windows SDK's x64 MakeAppx tool.
+The output is `artifacts\msix\LightCraftMidi_1.0.0.0_x64.msix`, plus a SHA-256 checksum.
+Use `-Version 1.0.1.0` to build an update, and `-Publisher "CN=YourPublisher"` to
+match your signing certificate. Keep the identity and publisher stable across updates.
+
+The generated package is **unsigned** and cannot be installed normally until signed.
+Sign with the Windows SDK's SignTool using an appropriate code-signing certificate
+whose subject exactly matches the package publisher:
+
+```powershell
+signtool sign /fd SHA256 /sha1 YOUR_CERTIFICATE_THUMBPRINT artifacts\msix\LightCraftMidi_1.0.0.0_x64.msix
+signtool verify /pa /v artifacts\msix\LightCraftMidi_1.0.0.0_x64.msix
+```
+
+For production, use a trusted signing service or certificate and timestamp the signature
+using your provider's documented timestamp URL. For testing, recipients must explicitly
+trust a self-signed certificate before installing. Do not distribute private keys.
+Signing changes the package bytes: regenerate the checksum afterward with `Get-FileHash`.
+Once signed and trusted, double-click the MSIX to install with Windows App Installer.
+It adds a Start menu entry; startup is hidden in the tray by default.
+Minimum packaged OS: Windows 10 version 2004 (build 19041).
+
 ## Mapping workflow
 
 1. **LightCraft.** In **Settings**, set the host and port, then click **Connect**. The app reconnects automatically. Once connected, the right pane lists every develop control (grouped by panel, with its range) and every command (grouped by menu). Use the search box to filter both lists.
