@@ -100,6 +100,31 @@ public class ProfileStoreTests : IDisposable
         Assert.Empty(Assert.Single(store.LoadProfiles()).Mappings);
     }
 
+    [Fact]
+    public void DiscoveryCaches_RoundTripMidiDevicesAndLightCraftCatalog()
+    {
+        var store = new ProfileStore(_dir);
+        store.SaveSettings(new AppSettings
+        {
+            MidiControlsByDevice = new Dictionary<string, List<DiscoveredMidiControl>>
+            {
+                ["Controller A"] =
+                [
+                    new(2, MidiMessageType.ControlChange, 14, 81, 6, "Control Change (CC)", DateTime.Now, [64, 81]),
+                ],
+            },
+            CachedDevelopControls = [new("light.exposure", "Exposure", "light", -5, 5, 0, 0.01, 2, "centered", null)],
+            CachedCommands = [new("edit.undo", "Undo", ["Edit"], "Ctrl+Z", null, true, false, null)],
+        });
+
+        var cached = new ProfileStore(_dir).LoadSettings();
+        var midiControl = Assert.Single(cached.MidiControlsByDevice["Controller A"]);
+        Assert.Equal(14, midiControl.Number);
+        Assert.Equal([64, 81], midiControl.ObservedValues);
+        Assert.Null(Assert.Single(cached.CachedDevelopControls).Value);
+        Assert.Equal("edit.undo", Assert.Single(cached.CachedCommands).Id);
+    }
+
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "lcmidi-tests-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
@@ -122,22 +147,26 @@ public class ProfileStoreTests : IDisposable
             Mappings =
             [
                 new MidiMapping { Channel = 11, MessageType = MidiMessageType.ControlChange, Number = 1, TargetId = "light.exposure", RangeMin = -2, Invert = true },
+                new MidiMapping { Channel = 1, MessageType = MidiMessageType.ControlChange, Number = 10, TargetKind = MappingTargetKind.LoadProfile, TargetId = "Editing", ToggleProfileButton = true },
                 new MidiMapping { MessageType = MidiMessageType.Note, Number = 8, TargetKind = MappingTargetKind.Command, TargetId = "photo.rate", CommandParams = "{\"rating\":4}" },
             ],
         };
         store.SaveProfile(profile);
-        store.SaveSettings(new AppSettings { Port = 7999, ActiveProfile = profile.Name });
+        store.SaveSettings(new AppSettings { Port = 7999, ActiveProfile = profile.Name, LogLevel = MappingLogLevel.Warning });
 
         var reloaded = new ProfileStore(_dir);
         var p = Assert.Single(reloaded.LoadProfiles());
         Assert.Equal(profile.Name, p.Name);
         Assert.Equal("X-TOUCH MINI", p.MidiInput);
-        Assert.Equal(2, p.Mappings.Count);
+        Assert.Equal(3, p.Mappings.Count);
         Assert.Equal(-2, p.Mappings[0].RangeMin);
         Assert.True(p.Mappings[0].Invert);
-        Assert.Equal(MappingTargetKind.Command, p.Mappings[1].TargetKind);
-        Assert.Equal("{\"rating\":4}", p.Mappings[1].CommandParams);
+        Assert.Equal(MappingTargetKind.LoadProfile, p.Mappings[1].TargetKind);
+        Assert.True(p.Mappings[1].ToggleProfileButton);
+        Assert.Equal(MappingTargetKind.Command, p.Mappings[2].TargetKind);
+        Assert.Equal("{\"rating\":4}", p.Mappings[2].CommandParams);
         Assert.Equal(7999, reloaded.LoadSettings().Port);
+        Assert.Equal(MappingLogLevel.Warning, reloaded.LoadSettings().LogLevel);
     }
 
     [Fact]

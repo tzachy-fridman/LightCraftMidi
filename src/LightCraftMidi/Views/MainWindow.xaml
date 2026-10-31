@@ -154,14 +154,9 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="5" />
-                    <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <StackPanel>
                     <TextBlock Text="MIDI controller" Style="{StaticResource Header}" />
-                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6"
-                               Text="Move every knob, fader and button once to detect it. Select a control and use the arrow to assign its MIDI source." />
                 </StackPanel>
                 <ListView Grid.Row="1" ItemsSource="{Binding DetectedControls}" SelectedItem="{Binding SelectedDetected}">
                     <ListView.ItemContainerStyle>
@@ -184,36 +179,25 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
-                    <Button Content="Clear" Command="{Binding ClearMonitorCommand}" />
-                </StackPanel>
-                <GridSplitter Grid.Row="3" HorizontalAlignment="Stretch" Background="Transparent" />
-                <DockPanel Grid.Row="4">
-                    <TextBlock DockPanel.Dock="Top" Text="MIDI monitor" Style="{StaticResource Header}" Margin="0,4,0,4" />
-                    <ListView ItemsSource="{Binding Monitor}" FontFamily="Consolas" FontSize="12">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="Time" Width="90" DisplayMemberBinding="{Binding Time}" />
-                                <GridViewColumn Header="Message" Width="160" DisplayMemberBinding="{Binding Message}" />
-                                <GridViewColumn Header="Action" Width="200" DisplayMemberBinding="{Binding Result}" />
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                </DockPanel>
             </Grid>
 
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent" />
 
             <!-- Mappings -->
             <Grid Grid.Column="2" Margin="6,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="52" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TextBlock Text="Mappings" Style="{StaticResource Header}" />
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
+                <TextBlock Grid.Column="1" Text="Mappings" Style="{StaticResource Header}" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
                     <Button Content="Add" Command="{Binding AddMappingCommand}"
                             ToolTip="Add a mapping using the selected MIDI control and the selected target in the current tab" />
                     <Button Command="{Binding LearnCommand}" ToolTip="Re-assign the MIDI source of the selected mapping">
@@ -230,20 +214,27 @@
                         </Button.Style>
                     </Button>
                     <Button Content="Remove" Command="{Binding RemoveMappingCommand}" />
+                    <Button Content="↑" Command="{Binding MoveMappingUpCommand}"
+                            ToolTip="Move selected mapping up within its group"
+                            AutomationProperties.Name="Move mapping up"
+                            AutomationProperties.AutomationId="MoveMappingUp" />
+                    <Button Content="↓" Command="{Binding MoveMappingDownCommand}"
+                            ToolTip="Move selected mapping down within its group"
+                            AutomationProperties.Name="Move mapping down"
+                            AutomationProperties.AutomationId="MoveMappingDown" />
                     <TextBlock Text="Learning — move a control on your MIDI device…" VerticalAlignment="Center" Foreground="#B8860B" FontWeight="SemiBold"
                                Visibility="{Binding IsLearning, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
 
-                <DockPanel Grid.Row="2">
-                    <Button DockPanel.Dock="Left" Content="→" FontSize="30" Width="46" Height="76"
-                            VerticalAlignment="Center" Margin="0,0,6,0" Focusable="False"
-                            Command="{Binding MapDetectedCommand}" ToolTip="Assign selected MIDI source"
-                            AutomationProperties.Name="Assign selected MIDI source" />
-                    <Button DockPanel.Dock="Right" Content="←" FontSize="30" Width="46" Height="76"
-                            VerticalAlignment="Center" Margin="6,0,0,0" Focusable="False"
-                            Command="{Binding AssignTargetCommand}" ToolTip="Assign selected LightCraft target"
-                            AutomationProperties.Name="Assign selected LightCraft target" />
-                <DataGrid x:Name="MappingList" ItemsSource="{Binding MappingsView}"
+                <Button Grid.Row="2" Grid.Column="0" Content="→" FontSize="30" Width="46" Height="76"
+                        VerticalAlignment="Center" Margin="0,0,6,0" Focusable="False"
+                        Command="{Binding MapDetectedCommand}" ToolTip="Assign selected MIDI source"
+                        AutomationProperties.Name="Assign selected MIDI source" />
+                <Button Grid.Row="2" Grid.Column="2" Content="←" FontSize="30" Width="46" Height="76"
+                        VerticalAlignment="Center" Margin="6,0,0,0" Focusable="False"
+                        Command="{Binding AssignTargetCommand}" ToolTip="Assign selected LightCraft target"
+                        AutomationProperties.Name="Assign selected LightCraft target" />
+                <DataGrid x:Name="MappingList" Grid.Row="2" Grid.Column="1" ItemsSource="{Binding MappingsView}"
                           SelectedItem="{Binding SelectedMapping, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                           IsSynchronizedWithCurrentItem="False" SelectionUnit="FullRow"
                           AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column" SelectionMode="Single"
@@ -301,10 +292,9 @@
                         <DataGridTextColumn Header="LightCraft target" Binding="{Binding TargetText}" Width="1.3*" />
                     </DataGrid.Columns>
                 </DataGrid>
-                </DockPanel>
 
                 <!-- Mapping editor -->
-                <GroupBox Grid.Row="3" Header="Selected mapping" Margin="0,8,0,0"
+                <GroupBox Grid.Row="3" Grid.Column="1" Header="Selected mapping" Margin="0,8,0,0"
                           DataContext="{Binding SelectedMapping}" IsEnabled="{Binding Converter={x:Static vm:NotNullConverter.Instance}}">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -317,21 +307,13 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="MIDI source" VerticalAlignment="Center" Margin="0,0,10,4" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,4">
-                            <TextBlock Text="Channel" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <ComboBox Width="62" DisplayMemberPath="Name" SelectedValuePath="Value"
-                                      ItemsSource="{Binding DataContext.Channels, RelativeSource={RelativeSource AncestorType=Window}}"
-                                      SelectedValue="{Binding Channel}" />
-                            <TextBlock Text="Type" VerticalAlignment="Center" Margin="10,0,4,0" />
-                            <ComboBox Width="120" ItemsSource="{Binding DataContext.MessageTypes, RelativeSource={RelativeSource AncestorType=Window}}"
-                                      SelectedItem="{Binding MessageType}" />
-                            <TextBlock Text="Number" VerticalAlignment="Center" Margin="10,0,4,0"
-                                       Visibility="{Binding NeedsNumber, Converter={StaticResource BoolToVis}}" />
-                            <TextBox Width="50" Text="{Binding Number, UpdateSourceTrigger=LostFocus}"
-                                     Visibility="{Binding NeedsNumber, Converter={StaticResource BoolToVis}}" />
+                            <TextBlock Text="{Binding SourceText}" VerticalAlignment="Center" FontWeight="SemiBold"
+                                       AutomationProperties.AutomationId="MappingMidiSource" />
                         </StackPanel>
 
                         <TextBlock Grid.Row="1" Text="Target" VerticalAlignment="Center" Margin="0,0,10,4" />
@@ -357,6 +339,8 @@
                             </StackPanel>
                             <TextBlock Text="{Binding RangeHint}" Style="{StaticResource Hint}" />
                         </StackPanel>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding RangeHint}" Style="{StaticResource Hint}"
+                                   Visibility="{Binding IsResetControl, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}" />
 
                         <!-- Command options -->
                         <TextBlock Grid.Row="2" Text="Command" VerticalAlignment="Top" Margin="0,4,10,4"
@@ -370,11 +354,24 @@
                                 <TextBlock Text="Params (JSON)" VerticalAlignment="Center" Margin="10,0,4,0" Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
                                 <TextBox MinWidth="180" FontFamily="Consolas" Text="{Binding CommandParams, UpdateSourceTrigger=LostFocus}" Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
+                            <CheckBox Content="Toggle profile button (turns other toggle profile buttons off)"
+                                      IsChecked="{Binding ToggleProfileButton}"
+                                      Visibility="{Binding IsProfileSwitch, Converter={StaticResource BoolToVis}}"
+                                      ToolTip="Use a controller button configured as a toggle. A press that turns it on loads this profile and sends MIDI-off to other toggle profile buttons." />
                             <TextBlock Text="{Binding ParamsHint}" Style="{StaticResource Hint}"
                                        Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
 
-                        <TextBlock Grid.Row="4" Grid.ColumnSpan="2" Text="{Binding Warning}" Foreground="#B35C00" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Text="{Binding Warning}" Foreground="#B35C00" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
+                            <Button Content="Add reset button" Padding="8,3" Margin="0,0,8,0"
+                                    Command="{Binding DataContext.AddResetButtonCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    Visibility="{Binding IsControl, Converter={StaticResource BoolToVis}}"
+                                    ToolTip="Create a separate MIDI button mapping that restores this control's default" />
+                            <Button Content="Test mapping" Padding="12,3"
+                                    Command="{Binding DataContext.TestMappingCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    Visibility="{Binding IsTestable, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
                     </Grid>
                 </GroupBox>
             </Grid>

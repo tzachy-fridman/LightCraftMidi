@@ -1,3 +1,4 @@
+using LightCraftMidi.Core.LightCraft;
 using LightCraftMidi.Core.Midi;
 
 namespace LightCraftMidi.Core.Mapping;
@@ -6,6 +7,9 @@ public enum MappingTargetKind
 {
     /// <summary>A develop slider (absolute value from a fader/knob).</summary>
     DevelopControl,
+
+    /// <summary>Reset a develop slider to its default when a MIDI button is pressed.</summary>
+    ResetControl,
 
     /// <summary>An engine/UI command (triggered by a button/note).</summary>
     Command,
@@ -30,6 +34,7 @@ public sealed class MidiMapping
     public MidiMessageType MessageType { get; set; } = MidiMessageType.ControlChange;
     /// <summary>CC or note number; -1 while unassigned.</summary>
     public int Number { get; set; } = -1;
+    public bool ToggleProfileButton { get; set; }
 
     public MappingTargetKind TargetKind { get; set; } = MappingTargetKind.DevelopControl;
     public string TargetId { get; set; } = "";
@@ -85,5 +90,9 @@ public sealed class AppSettings
     public string ActiveProfile { get; set; } = "Default";
     public bool MappingEnabled { get; set; } = true;
     public bool HideWindowOnStart { get; set; } = true;
+    public MappingLogLevel LogLevel { get; set; } = MappingLogLevel.Debug;
     public List<MidiMapping> ProfileButtons { get; set; } = [];
+    public Dictionary<string, List<DiscoveredMidiControl>> MidiControlsByDevice { get; set; } = [];
+    public List<DevelopControl> CachedDevelopControls { get; set; } = [];
+    public List<LightCraftCommand> CachedCommands { get; set; } = [];
 }

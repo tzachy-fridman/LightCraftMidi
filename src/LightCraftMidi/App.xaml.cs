@@ -86,6 +86,7 @@ public partial class App : Application
         }
         _tray?.Dispose();
         _tray = null;
+        if (_viewModel != null) await _viewModel.DisposeAsync();
         if (_host != null) await _host.DisposeAsync();
         Shutdown();
     }

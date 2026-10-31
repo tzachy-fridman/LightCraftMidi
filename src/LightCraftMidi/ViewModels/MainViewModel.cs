@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Diagnostics;
 using System.Windows.Data;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -21,22 +23,22 @@ public interface IDialogService
     void Inform(string title, string message);
 }
 
-public sealed record ChannelOption(int Value, string Name);
-
-public sealed record MonitorEntry(string Time, string Message, string Result, bool Mapped);
-
-public sealed partial class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 {
-    private const int MonitorLimit = 300;
     private readonly AppHost _host;
     private readonly IDialogService _dialogs;
     private readonly Dispatcher _dispatcher;
     private readonly ConcurrentQueue<MidiObservation> _incoming = new();
     private readonly DispatcherTimer _drainTimer;
+    private readonly DispatcherTimer _midiCacheTimer;
     private Dictionary<string, DevelopControl> _controlIndex = [];
     private Dictionary<string, LightCraftCommand> _commandIndex = [];
     private MappingViewModel? _learningMapping;
     private bool _loadingProfile;
+    private bool _diagnosticSubscribed;
+    private MappingTraceFile? _traceFile;
+    private string? _detectedMidiDevice;
+    private bool _midiDiscoveryDirty;
 
     public MainViewModel(AppHost host, IDialogService dialogs)
     {
@@ -48,6 +50,8 @@ public sealed partial class MainViewModel : ObservableObject
         _port = host.Settings.Port;
         _mappingEnabled = host.Settings.MappingEnabled;
         _hideWindowOnStart = host.Settings.HideWindowOnStart;
+        _logLevel = host.Settings.LogLevel;
+        host.Engine.MinimumLogLevel = _logLevel;
 
         ControlsView = CollectionViewSource.GetDefaultView(DevelopControls);
         ControlsView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(DevelopControl.SectionLabel)));
@@ -55,6 +59,13 @@ public sealed partial class MainViewModel : ObservableObject
         CommandsView = CollectionViewSource.GetDefaultView(Commands);
         CommandsView.GroupDescriptions.Add(new PropertyGroupDescription(null, new CommandGroupConverter()));
         CommandsView.Filter = o => Filter((LightCraftCommand)o);
+
+        LoadCachedLightCraftDiscovery();
+        _midiCacheTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+        {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _midiCacheTimer.Tick += (_, _) => SaveDetectedMidiControls();
 
         foreach (var p in host.Profiles) ProfileNames.Add(p.Name);
         MappingsView = CollectionViewSource.GetDefaultView(Mappings);
@@ -73,10 +84,15 @@ public sealed partial class MainViewModel : ObservableObject
             if (profile == null) LastMessage = $"Profile \"{name}\" no longer exists.";
             else if (profile != _host.ActiveProfile) LoadProfile(profile);
         });
-        host.Engine.Log += (_, msg) => _dispatcher.BeginInvoke(() => LastMessage = $"{DateTime.Now:HH:mm:ss}  {msg}");
+        host.Engine.Log += (_, msg) =>
+        {
+            host.Engine.WriteDiagnostic(MappingLogLevel.Error, msg);
+            _dispatcher.BeginInvoke(() => LastMessage = $"{DateTime.Now:HH:mm:ss}  {msg}");
+        };
 
         _drainTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(80), DispatcherPriority.Background, (_, _) => DrainIncoming(), _dispatcher);
         _drainTimer.Start();
+        InitializeLogging();
         UpdateStatus();
         if (host.Client.State == LightCraftConnectionState.Connected) _ = RefreshDiscoveryAsync();
     }
@@ -135,7 +151,23 @@ public sealed partial class MainViewModel : ObservableObject
     private void OnLightCraftStateChanged()
     {
         UpdateStatus();
+        TestMappingCommand.NotifyCanExecuteChanged();
         if (_host.Client.State == LightCraftConnectionState.Connected) _ = RefreshDiscoveryAsync();
+    }
+
+    private void LoadCachedLightCraftDiscovery()
+    {
+        var controls = _host.Settings.CachedDevelopControls;
+        var commands = _host.Settings.CachedCommands;
+        _host.Engine.UpdateControls(controls);
+        foreach (var control in controls) DevelopControls.Add(control with { Value = null });
+        foreach (var command in commands.OrderBy(CommandGroup).ThenBy(c => c.Label)) Commands.Add(command);
+        _controlIndex = controls.GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First());
+        _commandIndex = commands.GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First());
+        DiscoverySummary = controls.Count == 0 && commands.Count == 0
+            ? "Connect to LightCraft to discover its controls and commands"
+            : $"Cached: {controls.Count} develop controls · {commands.Count} commands";
+        ValidateAll();
     }
 
     private void UpdateStatus()
@@ -207,6 +239,7 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
         IsDiscovering = true;
+        DiscoverySummary = "Refreshing LightCraft controls and commands…";
         try
         {
             var controls = await _host.Client.GetControlsAsync();
@@ -219,6 +252,16 @@ public sealed partial class MainViewModel : ObservableObject
             foreach (var c in commands.OrderBy(CommandGroup).ThenBy(c => c.Label)) Commands.Add(c);
             _controlIndex = controls.GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First());
             _commandIndex = commands.GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First());
+            _host.Settings.CachedDevelopControls = controls.Select(c => c with { Value = null }).ToList();
+            _host.Settings.CachedCommands = commands.ToList();
+            try
+            {
+                _host.SaveSettings();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                LastMessage = "Could not save LightCraft discovery cache: " + ex.Message;
+            }
             DiscoverySummary = $"{controls.Count} develop controls · {commands.Count} commands";
             ValidateAll();
         }
@@ -271,6 +314,8 @@ public sealed partial class MainViewModel : ObservableObject
         var output = SelectedOutput == NoDevice ? null : SelectedOutput;
         var p = _host.ActiveProfile;
         if (p.MidiInput == input && p.MidiOutput == output) return;
+        if (!string.Equals(p.MidiInput, input, StringComparison.OrdinalIgnoreCase))
+            LoadDetectedMidiControls(input);
         p.MidiInput = input;
         p.MidiOutput = output;
         _host.Midi.SelectDevices(input, output);
@@ -286,6 +331,90 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string? _selectedSwitchProfileName;
     [ObservableProperty] private string? _selectedProfileName;
     [ObservableProperty] private bool _feedbackEnabled;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(OpenLogCommand))] private string? _logFilePath;
+    [ObservableProperty] private MappingLogLevel _logLevel;
+
+    public IReadOnlyList<MappingLogLevel> LogLevels { get; } = Enum.GetValues<MappingLogLevel>();
+
+    private void InitializeLogging()
+    {
+        try
+        {
+            _traceFile = CreateTraceFile();
+            _host.Engine.Diagnostic += OnDiagnostic;
+            _diagnosticSubscribed = true;
+            LogFilePath = _traceFile.FilePath;
+            _host.Engine.WriteDiagnostic(MappingLogLevel.Information, $"Logging started; minimum level={LogLevel}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LastMessage = "Could not create log file: " + ex.Message;
+        }
+    }
+
+    partial void OnLogLevelChanged(MappingLogLevel value)
+    {
+        _host.Engine.MinimumLogLevel = value;
+        _host.Settings.LogLevel = value;
+        _host.SaveSettings();
+        _traceFile?.Write(new MappingDiagnostic(DateTime.Now, MappingLogLevel.Information, $"Minimum log level changed to {value}"));
+    }
+
+    private MappingTraceFile CreateTraceFile()
+    {
+        var file = new MappingTraceFile();
+        file.WriteFailed += OnTraceWriteFailed;
+        return file;
+    }
+
+    private void OnDiagnostic(object? sender, MappingDiagnostic diagnostic)
+    {
+        if (_traceFile?.Write(diagnostic) != true) return;
+    }
+
+    private void OnTraceWriteFailed(object? sender, Exception exception)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            UnsubscribeDiagnostic();
+            LastMessage = "Log file write failed: " + exception.Message;
+        });
+    }
+
+    private bool CanOpenLog() => LogFilePath is { } path && File.Exists(path);
+
+    [RelayCommand(CanExecute = nameof(CanOpenLog))]
+    private void OpenLog()
+    {
+        if (LogFilePath is not { } path || !File.Exists(path)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            LastMessage = "Could not open log: " + ex.Message;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        SaveDetectedMidiControls();
+        UnsubscribeDiagnostic();
+        if (_traceFile != null)
+        {
+            _traceFile.WriteFailed -= OnTraceWriteFailed;
+            await _traceFile.DisposeAsync();
+            _traceFile = null;
+        }
+    }
+
+    private void UnsubscribeDiagnostic()
+    {
+        if (!_diagnosticSubscribed) return;
+        _host.Engine.Diagnostic -= OnDiagnostic;
+        _diagnosticSubscribed = false;
+    }
 
     partial void OnSelectedProfileNameChanged(string? value)
     {
@@ -308,6 +437,7 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             _host.ApplyProfile(profile);
+            LoadDetectedMidiControls(profile.MidiInput);
             SelectedProfileName = profile.Name;
             FeedbackEnabled = profile.FeedbackEnabled;
             Mappings.Clear();
@@ -431,26 +561,59 @@ public sealed partial class MainViewModel : ObservableObject
 
     public ObservableCollection<MappingViewModel> Mappings { get; } = [];
     public ICollectionView MappingsView { get; }
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(RemoveMappingCommand), nameof(LearnCommand))]
+    [ObservableProperty, NotifyCanExecuteChangedFor(
+        nameof(RemoveMappingCommand),
+        nameof(LearnCommand),
+        nameof(AddResetButtonCommand),
+        nameof(MoveMappingUpCommand),
+        nameof(MoveMappingDownCommand))]
     private MappingViewModel? _selectedMapping;
     [ObservableProperty] private bool _isLearning;
 
-    public IReadOnlyList<ChannelOption> Channels { get; } =
-        [new(0, "Any"), .. Enumerable.Range(1, 16).Select(i => new ChannelOption(i, i.ToString()))];
-    public IReadOnlyList<MidiMessageType> MessageTypes { get; } = Enum.GetValues<MidiMessageType>();
     public IReadOnlyList<CommandTrigger> Triggers { get; } = Enum.GetValues<CommandTrigger>();
 
     partial void OnSelectedMappingChanged(MappingViewModel? value)
     {
+        TestMappingCommand.NotifyCanExecuteChanged();
+        AddResetButtonCommand.NotifyCanExecuteChanged();
+        MoveMappingUpCommand.NotifyCanExecuteChanged();
+        MoveMappingDownCommand.NotifyCanExecuteChanged();
         if (value == null) return;
         TargetTabIndex = value.IsProfileSwitch ? 2 : value.IsCommand ? 1 : 0;
         if (value.IsProfileSwitch) SelectedSwitchProfileName = value.TargetId;
-        if (value.IsControl && _controlIndex.TryGetValue(value.TargetId, out var c)) SelectedControl = c;
+        if ((value.IsControl || value.IsResetControl) && _controlIndex.TryGetValue(value.TargetId, out var c)) SelectedControl = c;
         if (value.IsCommand && _commandIndex.TryGetValue(value.TargetId, out var cmd)) SelectedCommand = cmd;
+    }
+
+    private bool CanAddResetButton() => SelectedMapping is { IsControl: true, Model.HasTarget: true };
+
+    [RelayCommand(CanExecute = nameof(CanAddResetButton))]
+    private void AddResetButton()
+    {
+        if (SelectedMapping is not { IsControl: true } sliderMapping) return;
+
+        CancelLearn();
+        var model = new MidiMapping
+        {
+            TargetKind = MappingTargetKind.ResetControl,
+            TargetId = sliderMapping.Model.TargetId,
+            TargetLabel = sliderMapping.Model.TargetLabel,
+            Feedback = false,
+        };
+        var profile = sliderMapping.IsGlobal ? _host.GlobalProfile : _host.ActiveProfile;
+        profile.Mappings.Add(model);
+        var resetMapping = new MappingViewModel(model, OnMappingChanged) { IsGlobal = sliderMapping.IsGlobal };
+        Mappings.Add(resetMapping);
+        SelectedMapping = resetMapping;
+        Validate(resetMapping);
+        SaveMappings();
+        StartLearn(resetMapping);
     }
 
     private void OnMappingChanged(MappingViewModel vm)
     {
+        TestMappingCommand.NotifyCanExecuteChanged();
+        AddResetButtonCommand.NotifyCanExecuteChanged();
         if (vm.IsProfileSwitch && !vm.IsGlobal)
         {
             _host.ActiveProfile.Mappings.Remove(vm.Model);
@@ -519,6 +682,47 @@ public sealed partial class MainViewModel : ObservableObject
         OnMappingChangedAfterRemove();
     }
 
+    private bool CanMoveMappingUp() => CanMoveMapping(-1);
+    private bool CanMoveMappingDown() => CanMoveMapping(1);
+
+    private bool CanMoveMapping(int direction)
+    {
+        if (SelectedMapping is not { } mapping) return false;
+        var mappings = (mapping.IsGlobal ? _host.GlobalProfile : _host.ActiveProfile).Mappings;
+        int index = mappings.IndexOf(mapping.Model);
+        return index >= 0 && index + direction >= 0 && index + direction < mappings.Count;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanMoveMappingUp))]
+    private void MoveMappingUp() => MoveSelectedMapping(-1);
+
+    [RelayCommand(CanExecute = nameof(CanMoveMappingDown))]
+    private void MoveMappingDown() => MoveSelectedMapping(1);
+
+    private void MoveSelectedMapping(int direction)
+    {
+        if (SelectedMapping is not { } mapping) return;
+        var ownerMappings = (mapping.IsGlobal ? _host.GlobalProfile : _host.ActiveProfile).Mappings;
+        int ownerIndex = ownerMappings.IndexOf(mapping.Model);
+        int targetOwnerIndex = ownerIndex + direction;
+        if (ownerIndex < 0 || targetOwnerIndex < 0 || targetOwnerIndex >= ownerMappings.Count) return;
+
+        int listIndex = Mappings.IndexOf(mapping);
+        if (listIndex < 0) return;
+        int targetListIndex = listIndex + direction;
+        if (targetListIndex < 0 || targetListIndex >= Mappings.Count
+            || Mappings[targetListIndex].IsGlobal != mapping.IsGlobal) return;
+
+        ownerMappings.RemoveAt(ownerIndex);
+        ownerMappings.Insert(targetOwnerIndex, mapping.Model);
+        Mappings.Move(listIndex, targetListIndex);
+        MappingsView.Refresh();
+        SelectedMapping = mapping;
+        SaveMappings();
+        MoveMappingUpCommand.NotifyCanExecuteChanged();
+        MoveMappingDownCommand.NotifyCanExecuteChanged();
+    }
+
     private void OnMappingChangedAfterRemove()
     {
         foreach (var m in Mappings) Validate(m);
@@ -527,6 +731,34 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     private bool HasSelection() => SelectedMapping != null;
+
+    private bool CanTestMapping() =>
+        LightCraftConnected && SelectedMapping is { Model.HasTarget: true, IsProfileSwitch: false };
+
+    [RelayCommand(CanExecute = nameof(CanTestMapping))]
+    private async Task TestMappingAsync()
+    {
+        if (SelectedMapping is not { } vm) return;
+        try
+        {
+            int? rawValue = null;
+            if (vm.IsControl)
+            {
+                var detected = DetectedControls.FirstOrDefault(d => vm.Model.Matches(
+                    new MidiMessage(d.Channel, d.Type, d.Number, d.LastValue)));
+                if (detected == null)
+                    throw new LightCraftException("Move the mapped MIDI control once before testing it.");
+                rawValue = detected.LastValue;
+            }
+
+            await _host.Engine.TestMappingAsync(vm.Model, rawValue);
+            LastMessage = $"Tested {vm.TargetText}.";
+        }
+        catch (Exception ex) when (ex is LightCraftException or JsonException or InvalidOperationException)
+        {
+            LastMessage = "Test failed: " + ex.Message;
+        }
+    }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private void Learn()
@@ -594,7 +826,8 @@ public sealed partial class MainViewModel : ObservableObject
         control ??= SelectedControl;
         if (control == null) return;
         var vm = SelectedMapping ?? NewMapping();
-        vm.AssignTarget(MappingTargetKind.DevelopControl, control.Id, $"{control.SectionLabel} › {control.Label}");
+        vm.AssignTarget(vm.IsResetControl ? MappingTargetKind.ResetControl : MappingTargetKind.DevelopControl,
+            control.Id, $"{control.SectionLabel} › {control.Label}");
         if (!vm.Model.HasSource && !IsLearning) StartLearn(vm);
     }
 
@@ -639,15 +872,25 @@ public sealed partial class MainViewModel : ObservableObject
             if (dupes > 0) warnings.Add($"Same MIDI source is used by {dupes} other mapping(s).");
         }
 
-        if (m.TargetKind == MappingTargetKind.DevelopControl && m.HasTarget)
+        if ((m.TargetKind is MappingTargetKind.DevelopControl or MappingTargetKind.ResetControl) && m.HasTarget)
         {
             if (_controlIndex.TryGetValue(m.TargetId, out var c))
             {
-                vm.RangeHint = $"Full range {c.RangeText} (default {c.Format(c.Default)})";
-                if (m.RangeMin is { } lo && m.RangeMax is { } hi && lo >= hi) warnings.Add("Range minimum must be below maximum.");
+                if (vm.IsResetControl)
+                {
+                    vm.RangeHint = $"Button press sets {c.Format(c.Default)} (default)";
+                    if (m.MessageType == MidiMessageType.PitchBend) warnings.Add("Use a note or button-style CC to reset a control.");
+                    var source = DetectedControls.FirstOrDefault(d => m.Matches(new MidiMessage(d.Channel, d.Type, d.Number, 0)));
+                    if (source?.IsContinuous == true) warnings.Add("This source looks like a knob/fader; use a button so resetting does not happen while turning.");
+                }
+                else
+                {
+                    vm.RangeHint = $"Full range {c.RangeText} (default {c.Format(c.Default)})";
+                    if (m.RangeMin is { } lo && m.RangeMax is { } hi && lo >= hi) warnings.Add("Range minimum must be below maximum.");
+                    if (m.MessageType == MidiMessageType.Note) warnings.Add("Buttons/notes only send on/off — the slider will jump between its ends. Use a knob or fader.");
+                }
             }
             else if (_controlIndex.Count > 0) warnings.Add($"LightCraft has no develop control \"{m.TargetId}\".");
-            if (m.MessageType == MidiMessageType.Note) warnings.Add("Buttons/notes only send on/off — the slider will jump between its ends. Use a knob or fader.");
         }
 
         if (m.TargetKind == MappingTargetKind.Command && m.HasTarget)
@@ -677,19 +920,11 @@ public sealed partial class MainViewModel : ObservableObject
         vm.Warning = warnings.Count == 0 ? null : string.Join("\n", warnings);
     }
 
-    // ---------- MIDI monitor & detected controls ----------
+    // ---------- Detected MIDI controls ----------
 
-    public ObservableCollection<MonitorEntry> Monitor { get; } = [];
     public ObservableCollection<DetectedControlViewModel> DetectedControls { get; } = [];
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(MapDetectedCommand))]
     private DetectedControlViewModel? _selectedDetected;
-
-    [RelayCommand]
-    private void ClearMonitor()
-    {
-        Monitor.Clear();
-        DetectedControls.Clear();
-    }
 
     [RelayCommand(CanExecute = nameof(HasDetected))]
     private void MapDetected()
@@ -710,9 +945,11 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (_incoming.IsEmpty) return;
         var activeIds = new HashSet<Guid>();
+        bool observedMessages = false;
         int budget = 500;
         while (budget-- > 0 && _incoming.TryDequeue(out var o))
         {
+            observedMessages = true;
             var m = o.Message;
             var detected = DetectedControls.FirstOrDefault(d => d.Matches(m));
             if (detected == null)
@@ -722,30 +959,80 @@ public sealed partial class MainViewModel : ObservableObject
                 DetectedControls.Add(detected);
             }
             else detected.Observe(m);
-
-            string result = o.Learned ? "learned"
-                : o.Matched.Count == 0 ? ""
-                : (MappingEnabled || o.Matched.Any(x => x.TargetKind == MappingTargetKind.LoadProfile) ? "→ " : "(paused) ") + string.Join(", ", o.Matched.Select(x => x.TargetLabel ?? x.TargetId));
-            foreach (var x in o.Matched) activeIds.Add(x.Id);
-
-            // Collapse a stream from the same control into one line.
-            if (Monitor.Count > 0 && Monitor[0].Message.StartsWith(m.SourceText + " =", StringComparison.Ordinal) && m.Type != MidiMessageType.Note)
-                Monitor[0] = new MonitorEntry(DateTime.Now.ToString("HH:mm:ss.fff"), m.ToString(), result, o.Matched.Count > 0);
-            else
-                Monitor.Insert(0, new MonitorEntry(DateTime.Now.ToString("HH:mm:ss.fff"), m.ToString(), result, o.Matched.Count > 0));
+            foreach (var mapping in o.Matched) activeIds.Add(mapping.Id);
         }
-        while (Monitor.Count > MonitorLimit) Monitor.RemoveAt(Monitor.Count - 1);
-        foreach (var vm in Mappings) vm.IsActive = activeIds.Contains(vm.Model.Id);
+        foreach (var mapping in Mappings) mapping.IsActive = activeIds.Contains(mapping.Model.Id);
+        if (observedMessages && !string.IsNullOrWhiteSpace(_detectedMidiDevice))
+        {
+            _midiDiscoveryDirty = true;
+            _midiCacheTimer.Stop();
+            _midiCacheTimer.Start();
+        }
+        TestMappingCommand.NotifyCanExecuteChanged();
     }
 
-    private string? MappedTargets(DetectedControlViewModel d)
+    private void LoadDetectedMidiControls(string? device)
     {
-        var probe = new MidiMessage(d.Channel, d.Type, d.Number, 0);
+        SaveDetectedMidiControls();
+        _detectedMidiDevice = device;
+        DetectedControls.Clear();
+        if (!string.IsNullOrWhiteSpace(device))
+        {
+            var cached = _host.Settings.MidiControlsByDevice
+                .FirstOrDefault(entry => string.Equals(entry.Key, device, StringComparison.OrdinalIgnoreCase)).Value;
+            if (cached != null)
+            {
+                foreach (var snapshot in cached)
+                {
+                    var detected = new DetectedControlViewModel(snapshot) { MappedTo = MappedTargets(snapshot) };
+                    DetectedControls.Add(detected);
+                }
+            }
+        }
+    }
+
+    private string? MappedTargets(DiscoveredMidiControl detected) =>
+        MappedTargets(detected.Channel, detected.Type, detected.Number);
+
+    private string? MappedTargets(DetectedControlViewModel d)
+        => MappedTargets(d.Channel, d.Type, d.Number);
+
+    private string? MappedTargets(int channel, MidiMessageType type, int number)
+    {
+        var probe = new MidiMessage(channel, type, number, 0);
         var global = _host.GlobalProfile.Mappings.Where(m => m.TargetKind == MappingTargetKind.LoadProfile && m.HasTarget && m.Matches(probe)).ToArray();
         var names = (global.Length > 0 ? global : _host.GlobalProfile.Mappings.Concat(_host.ActiveProfile.Mappings))
             .Where(m => m.HasTarget && m.Matches(probe)).Select(m =>
-                m.TargetKind == MappingTargetKind.LoadProfile ? "Load profile: " + m.TargetId : m.TargetLabel ?? m.TargetId).ToArray();
+                m.TargetKind == MappingTargetKind.LoadProfile ? "Load profile: " + m.TargetId
+                : m.TargetKind == MappingTargetKind.ResetControl ? "Reset: " + (m.TargetLabel ?? m.TargetId)
+                : m.TargetLabel ?? m.TargetId).ToArray();
         return names.Length == 0 ? null : string.Join(", ", names);
+    }
+
+    private void SaveDetectedMidiControls()
+    {
+        _midiCacheTimer.Stop();
+        if (!_midiDiscoveryDirty) return;
+        if (string.IsNullOrWhiteSpace(_detectedMidiDevice))
+        {
+            _midiDiscoveryDirty = false;
+            return;
+        }
+
+        var key = _host.Settings.MidiControlsByDevice.Keys
+            .FirstOrDefault(existing => string.Equals(existing, _detectedMidiDevice, StringComparison.OrdinalIgnoreCase));
+        if (key != null && !string.Equals(key, _detectedMidiDevice, StringComparison.Ordinal))
+            _host.Settings.MidiControlsByDevice.Remove(key);
+        _host.Settings.MidiControlsByDevice[_detectedMidiDevice] = DetectedControls.Select(d => d.ToSnapshot()).ToList();
+        try
+        {
+            _host.SaveSettings();
+            _midiDiscoveryDirty = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LastMessage = "Could not save discovered MIDI controls: " + ex.Message;
+        }
     }
 
     private sealed class CommandGroupConverter : IValueConverter

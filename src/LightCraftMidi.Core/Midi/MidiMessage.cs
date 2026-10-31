@@ -37,6 +37,16 @@ public readonly record struct MidiMessage(int Channel, MidiMessageType Type, int
     }
 }
 
+public sealed record DiscoveredMidiControl(
+    int Channel,
+    MidiMessageType Type,
+    int Number,
+    int LastValue,
+    int MessageCount,
+    string Kind,
+    DateTime LastSeen,
+    IReadOnlyList<int> ObservedValues);
+
 /// <summary>Converts between packed winmm short messages (status | data1 &lt;&lt; 8 | data2 &lt;&lt; 16) and <see cref="MidiMessage"/>.</summary>
 public static class MidiCodec
 {

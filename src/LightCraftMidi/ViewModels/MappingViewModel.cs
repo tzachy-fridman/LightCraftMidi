@@ -26,9 +26,9 @@ public sealed partial class MappingViewModel : ObservableObject
     [ObservableProperty] private string? _rangeHint;
     [ObservableProperty] private bool _isActive;
 
-    public int Channel { get => Model.Channel; set => Set(Model.Channel, value, v => Model.Channel = v); }
-    public MidiMessageType MessageType { get => Model.MessageType; set => Set(Model.MessageType, value, v => Model.MessageType = v); }
-    public int Number { get => Model.Number; set => Set(Model.Number, value, v => Model.Number = v); }
+    public int Channel => Model.Channel;
+    public MidiMessageType MessageType => Model.MessageType;
+    public int Number => Model.Number;
     public MappingTargetKind TargetKind { get => Model.TargetKind; set => Set(Model.TargetKind, value, v => Model.TargetKind = v); }
     public string TargetId
     {
@@ -46,18 +46,20 @@ public sealed partial class MappingViewModel : ObservableObject
     public double? RangeMax { get => Model.RangeMax; set => Set(Model.RangeMax, value, v => Model.RangeMax = v); }
     public bool Feedback { get => Model.Feedback; set => Set(Model.Feedback, value, v => Model.Feedback = v); }
     public CommandTrigger Trigger { get => Model.Trigger; set => Set(Model.Trigger, value, v => Model.Trigger = v); }
+    public bool ToggleProfileButton { get => Model.ToggleProfileButton; set => Set(Model.ToggleProfileButton, value, v => Model.ToggleProfileButton = v); }
     public string? CommandParams { get => Model.CommandParams; set => Set(Model.CommandParams, string.IsNullOrWhiteSpace(value) ? null : value, v => Model.CommandParams = v); }
 
     public string SourceText => IsLearning ? "Move a control…" : Model.HasSource ? Model.SourceText : "(not assigned)";
     public string TargetText => IsProfileSwitch ? "Load profile: " + Model.TargetId
+        : IsResetControl && Model.HasTarget ? "Reset: " + (Model.TargetLabel ?? Model.TargetId)
         : Model.HasTarget ? $"{Model.TargetLabel ?? Model.TargetId}" : "(no target)";
-    public string KindText => IsProfileSwitch ? "Load profile" : Model.TargetKind == MappingTargetKind.Command ? "Command" : "Slider";
+    public string KindText => IsProfileSwitch ? "Load profile" : IsResetControl ? "Reset" : Model.TargetKind == MappingTargetKind.Command ? "Command" : "Slider";
     public bool IsControl => Model.TargetKind == MappingTargetKind.DevelopControl;
+    public bool IsResetControl => Model.TargetKind == MappingTargetKind.ResetControl;
     public bool IsCommand => Model.TargetKind == MappingTargetKind.Command;
     public bool IsProfileSwitch => Model.TargetKind == MappingTargetKind.LoadProfile;
     public bool IsTriggerTarget => IsCommand || IsProfileSwitch;
-    public bool NeedsNumber => Model.MessageType != MidiMessageType.PitchBend;
-
+    public bool IsTestable => (IsControl || IsResetControl || IsCommand) && Model.HasTarget;
     partial void OnIsLearningChanged(bool value) => OnPropertyChanged(nameof(SourceText));
 
     public void AssignSource(MidiMessage m)
@@ -74,9 +76,9 @@ public sealed partial class MappingViewModel : ObservableObject
         Model.TargetKind = kind;
         Model.TargetId = id;
         Model.TargetLabel = label;
-        if (kind == MappingTargetKind.Command)
+        if (kind is MappingTargetKind.Command or MappingTargetKind.ResetControl)
         {
-            Model.CommandParams = commandParams;
+            if (kind == MappingTargetKind.Command) Model.CommandParams = commandParams;
             Model.RangeMin = Model.RangeMax = null;
         }
         RaiseAll();

@@ -82,6 +82,75 @@ public class GlobalProfileTests
         });
     }
 
+    [Fact]
+    public void DetectedControl_DoesNotRequireFullTravelToIdentifyCC()
+    {
+        var detected = new DetectedControlViewModel(new MidiMessage(1, MidiMessageType.ControlChange, 7, 64));
+
+        Assert.Equal("Control Change (CC)", detected.Kind);
+        detected.Observe(new MidiMessage(1, MidiMessageType.ControlChange, 7, 72));
+        Assert.Equal("Control Change (CC)", detected.Kind);
+    }
+
+    [Fact]
+    public void AddResetButton_BecomesEnabledAfterNewMappingGetsControlTarget()
+    {
+        InSta(dir =>
+        {
+            var host = new AppHost(new ProfileStore(dir));
+            try
+            {
+                var vm = new MainViewModel(host, new Dialogs());
+                vm.SelectedControl = new DevelopControl("light.exposure", "Exposure", "light", -5, 5, 0, 0.01, 2, "centered", 0);
+                vm.TargetTabIndex = 0;
+
+                vm.AddMappingCommand.Execute(null);
+
+                Assert.True(vm.AddResetButtonCommand.CanExecute(null));
+            }
+            finally { host.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_LoadsMidiDiscoveryForSelectedControllerOnly()
+    {
+        InSta(dir =>
+        {
+            var store = new ProfileStore(dir);
+            store.SaveProfile(new MappingProfile { Name = "Default", MidiInput = "Controller A" });
+            store.SaveSettings(new AppSettings
+            {
+                MidiControlsByDevice = new Dictionary<string, List<DiscoveredMidiControl>>
+                {
+                    ["Controller A"] =
+                    [
+                        new(2, MidiMessageType.ControlChange, 14, 81, 6, "Control Change (CC)", DateTime.Now, [64, 81]),
+                    ],
+                    ["Controller B"] =
+                    [
+                        new(3, MidiMessageType.Note, 45, 127, 2, "Button / pad (note)", DateTime.Now, [0, 127]),
+                    ],
+                },
+                CachedDevelopControls = [new("light.exposure", "Exposure", "light", -5, 5, 0, 0.01, 2, "centered", 2.5)],
+                CachedCommands = [new("edit.undo", "Undo", ["Edit"], "Ctrl+Z", null, true, false, null)],
+            });
+            var host = new AppHost(store);
+            try
+            {
+                var vm = new MainViewModel(host, new Dialogs());
+
+                var control = Assert.Single(vm.DetectedControls);
+                Assert.Equal(2, control.Channel);
+                Assert.Equal(14, control.Number);
+                Assert.Equal("light.exposure", Assert.Single(vm.DevelopControls).Id);
+                Assert.Equal("edit.undo", Assert.Single(vm.Commands).Id);
+                Assert.Contains("Cached:", vm.DiscoverySummary);
+            }
+            finally { host.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        });
+    }
+
     private sealed class Dialogs : IDialogService
     {
         public string? NextName { get; set; }
@@ -211,7 +280,7 @@ public class GlobalProfileTests
                 Assert.Equal(["Global mappings", "Profile mappings"], vm.Mappings.Select(m => m.Scope));
                 Assert.Equal(2, vm.MappingsView.Groups!.Count);
                 vm.SelectedMapping = vm.Mappings[0];
-                vm.SelectedMapping.Number = 40;
+                vm.SelectedMapping.AssignSource(new MidiMessage(1, MidiMessageType.ControlChange, 40, 64));
                 Assert.Equal(40, Assert.Single(store.LoadGlobalProfile(new AppSettings()).Mappings).Number);
                 vm.SelectedProfileName = "Other";
                 Assert.Equal(["Global mappings", "Profile mappings"], vm.Mappings.Select(m => m.Scope));
@@ -290,6 +359,46 @@ public class GlobalProfileTests
                 window?.Close();
                 host.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
+        });
+    }
+
+    [Fact]
+    public void MoveMapping_ReordersWithinItsGroupAndPersistsOrder()
+    {
+        InSta(dir =>
+        {
+            var store = new ProfileStore(dir);
+            store.SaveProfile(new MappingProfile
+            {
+                Name = "Default",
+                Mappings =
+                [
+                    new MidiMapping { Number = 1, TargetId = "light.exposure" },
+                    new MidiMapping { Number = 2, TargetId = "light.contrast" },
+                ],
+            });
+            store.SaveProfile(new MappingProfile
+            {
+                Name = "Global",
+                Mappings = [new MidiMapping { Number = 36, TargetKind = MappingTargetKind.LoadProfile, TargetId = "Default" }],
+            });
+            var host = new AppHost(store);
+            try
+            {
+                var vm = new MainViewModel(host, new Dialogs());
+                var firstProfileMapping = vm.Mappings[1];
+                vm.SelectedMapping = firstProfileMapping;
+
+                Assert.False(vm.MoveMappingUpCommand.CanExecute(null));
+                Assert.True(vm.MoveMappingDownCommand.CanExecute(null));
+                vm.MoveMappingDownCommand.Execute(null);
+
+                Assert.Equal([2, 1], host.ActiveProfile.Mappings.Select(mapping => mapping.Number));
+                Assert.Equal([36, 2, 1], vm.Mappings.Select(mapping => mapping.Number));
+                Assert.Same(firstProfileMapping, vm.SelectedMapping);
+                Assert.Equal([2, 1], Assert.Single(store.LoadProfiles()).Mappings.Select(mapping => mapping.Number));
+            }
+            finally { host.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
         });
     }
 

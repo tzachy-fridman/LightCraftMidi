@@ -41,6 +41,18 @@
                 <Button Content="Rescan MIDI devices" Command="{Binding RefreshDevicesCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
             </StackPanel>
         </GroupBox>
+        <GroupBox Header="Logging">
+            <StackPanel>
+                <TextBlock Text="Minimum log level" Margin="0,0,0,4" />
+                <ComboBox ItemsSource="{Binding LogLevels}" SelectedItem="{Binding LogLevel}"
+                          AutomationProperties.AutomationId="LogLevel" />
+                <TextBlock Text="Logs are always written to a file in your local application data folder."
+                           TextWrapping="Wrap" Foreground="#666" Margin="0,8,0,8" />
+                <Button Content="Open current log" Command="{Binding OpenLogCommand}"
+                        ToolTip="{Binding LogFilePath}" HorizontalAlignment="Left"
+                        AutomationProperties.AutomationId="OpenLog" />
+            </StackPanel>
+        </GroupBox>
         <GroupBox Header="Startup">
             <CheckBox Content="Hide window on start" IsChecked="{Binding HideWindowOnStart}"
                       AutomationProperties.AutomationId="HideWindowOnStart"
