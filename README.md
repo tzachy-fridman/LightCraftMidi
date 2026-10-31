@@ -84,18 +84,20 @@ Minimum packaged OS: Windows 10 version 2004 (build 19041).
 
 1. **LightCraft.** In **Settings**, set the host and port, then click **Connect**. The app reconnects automatically. Once connected, the right pane lists every develop control (grouped by panel, with its range) and every command (grouped by menu). Use the search box to filter both lists.
 2. **MIDI.** In **Settings**, pick the input device, and the output device if your controller has motor faders or LED rings. Devices are reopened automatically when they are unplugged and plugged back in.
-3. **Discover the controller.** Move every knob, fader and button once. The *MIDI controller* list detects each one and classifies it as a button, a fader/knob, or a 14-bit pitch-bend fader. Relative encoders are flagged as unsupported. The *MIDI monitor* shows the raw traffic and which mapping fired.
+3. **Discover the controller.** Move each control once. The *MIDI controller* list identifies each source by MIDI channel, type and number; pitch bend and note/button sources are identified by their message type, and relative encoders are flagged when recognized. CC controls are shown generically; the app does not infer a physical knob/fader range or require moving it through its full travel. MIDI diagnostics are always written to timestamped files in `%LOCALAPPDATA%\LightCraftMidi\Logs`. In **Settings**, choose a minimum log level (the default **Debug** includes mapped values and LightCraft request/queue timings; **Trace** also includes raw MIDI and feedback-poll details) and click **Open current log** to inspect the active file.
 4. **Map.** Select a detected MIDI control and a target in **Knobs**, **Commands**, or **Profiles**, then click **Add** to create a mapping with both selections. Missing selections can be assigned later; **Learn** captures a MIDI source when needed. The large left-pointing arrow assigns the selected target to an existing mapping. The right-pointing arrow assigns the selected detected MIDI source to the selected mapping (or creates a mapping when none is selected). Double-clicking an individual source or target also assigns it.
 5. **Fine-tune** the selected mapping:
-   - Channel (or *any*), invert, a custom target range, and per-mapping feedback.
+   - MIDI source is assigned through **Learn** and is read-only in the mapping editor. Configure invert, a custom target range, and per-mapping feedback as needed.
    - For commands: the trigger (on press, or on any change) and params as JSON, for example `{"rating": 4}`.
+   - For a slider mapping, click **Add reset button** to create a separate mapping to the same control, then press the MIDI button to learn it. Each button press restores LightCraft's reported default value.
    - Warnings flag duplicates, unknown targets, and type mismatches.
+   - Click **Test mapping** to run a command with its configured JSON params, apply a knob's last observed MIDI value, or test a reset mapping. Knobs must be moved at least once since opening the app.
 
 Changes are saved immediately.
 
 ## Behaviour
 
-- Slider updates are coalesced into `develop.set` calls. Each fader move is wrapped in a `develop.beginInteraction` / `develop.endInteraction` pair, so it is a single undo step.
+- Every mapped slider value received from MIDI is sent to LightCraft in order; values are not coalesced. Continuous movement is grouped into one `develop.beginInteraction` / `develop.endInteraction` interaction, so it remains a single undo step.
 - Centred controls snap to exactly 0 when the fader is at the middle position.
 - **Feedback.** Every 300 ms the app polls LightCraft's control values. Any changed values are sent back to the controller, so motor faders and LEDs follow photo changes and edits made with the mouse. A control is skipped while you are moving it.
 
@@ -103,10 +105,10 @@ Changes are saved immediately.
 
 Profiles and settings are stored as JSON in `%APPDATA%\LightCraftMidi`:
 
-- `settings.json` holds the connection settings and the active profile.
+- `settings.json` holds connection settings, per-controller MIDI discovery, and the cached LightCraft controls and commands.
 - Each profile is saved as `profiles\<name>.json`.
 
-Each profile remembers its MIDI devices. You can create, duplicate, rename and delete profiles from the Profile bar.
+Each profile remembers its MIDI devices. Discovered MIDI controls are restored for the selected controller, and the cached LightCraft controls and commands are shown immediately; LightCraft discovery refreshes whenever a connection is established. You can create, duplicate, rename and delete profiles from the Profile bar.
 
 ### Global profile buttons
 
@@ -130,6 +132,12 @@ Use **OnPress** for ordinary momentary buttons (release is ignored), or **OnAnyC
 for CC toggle buttons. Global buttons take priority over the same source in a profile,
 receive no slider feedback, and continue working while LightCraft mapping is paused
 or disconnected. MIDI Learn captures the button without switching profiles.
+
+For hardware buttons configured to send their latched on/off state (for example with
+the X-Touch Editor), enable **Toggle profile button** on that profile mapping. The app
+loads the profile only when the MIDI state changes from off to on, then sends a
+zero/off message to the other toggle profile buttons when a MIDI output is configured.
+This option is independent of the controller's button mode and is off by default.
 Conflicting profile-switch sources are flagged; the first assignment wins.
 
 Buttons listen on the active profile's selected MIDI input. Keep the same input in
