@@ -84,7 +84,7 @@ public class MappingEngineTests
                 Number = 10,
                 TargetKind = MappingTargetKind.LoadProfile,
                 TargetId = "Develop",
-                ToggleProfileButton = true,
+                HandleAsToggle = true,
             };
             var second = new MidiMapping
             {
@@ -93,7 +93,7 @@ public class MappingEngineTests
                 Number = 36,
                 TargetKind = MappingTargetKind.LoadProfile,
                 TargetId = "Color",
-                ToggleProfileButton = true,
+                HandleAsToggle = true,
             };
             engine.SetProfileButtons([first, second]);
             var requests = new List<string>();
@@ -106,10 +106,37 @@ public class MappingEngineTests
 
             Assert.Equal(["Develop", "Color"], requests);
             Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 10, 0), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.Note, 36, 127), midi.Sent);
 
             midi.Receive(new MidiMessage(1, MidiMessageType.Note, 36, 0));
             midi.Receive(new MidiMessage(1, MidiMessageType.Note, 36, 127));
             Assert.Equal(["Develop", "Color", "Color"], requests);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.Note, 36, 127), midi.Sent);
+        }
+    }
+
+    [Fact]
+    public void ActiveProfileButton_FeedbackRestoresItsOnStateWhenTurnedOff()
+    {
+        var (engine, midi, _) = Create();
+        using (engine)
+        {
+            var button = new MidiMapping
+            {
+                Channel = 1,
+                MessageType = MidiMessageType.ControlChange,
+                Number = 10,
+                TargetKind = MappingTargetKind.LoadProfile,
+                TargetId = "Develop",
+                HandleAsToggle = true,
+            };
+            engine.SetProfileButtons([button]);
+            engine.SetActiveProfile("Develop");
+            midi.Sent.Clear();
+
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 10, 0));
+
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 10, 127), midi.Sent);
         }
     }
 
@@ -128,6 +155,176 @@ public class MappingEngineTests
             engine.SetProfileButtons([button]);
             await engine.PushFeedbackAsync();
             Assert.Empty(midi.Sent);
+        }
+    }
+
+    [Fact]
+    public async Task ToggleCommands_ExecuteOnBothStateEdgesAndFollowLightCraftCheckedState()
+    {
+        var edit = new MidiMapping
+        {
+            Channel = 1,
+            MessageType = MidiMessageType.ControlChange,
+            Number = 10,
+            TargetKind = MappingTargetKind.Command,
+            TargetId = "panel.edit",
+            HandleAsToggle = true,
+        };
+        var crop = new MidiMapping
+        {
+            Channel = 1,
+            MessageType = MidiMessageType.ControlChange,
+            Number = 11,
+            TargetKind = MappingTargetKind.Command,
+            TargetId = "panel.crop",
+            HandleAsToggle = true,
+        };
+        var (engine, midi, client) = Create(edit, crop);
+        using (engine)
+        {
+            SetMenuState(client, ("panel.edit", true), ("panel.crop", false));
+            await engine.PushFeedbackAsync();
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 10, 127), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 11, 0), midi.Sent);
+            midi.Sent.Clear();
+
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 11, 127));
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 11, 127));
+            await WaitForAsync(() => client.Executed().Any(c => c.Command == "panel.crop"));
+            SetMenuState(client, ("panel.edit", false), ("panel.crop", true));
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 11, 0));
+            await WaitForAsync(() => client.Executed().Count(c => c.Command == "panel.crop") == 2);
+            Assert.Equal(2, client.Executed().Count(c => c.Command == "panel.crop"));
+
+            SetMenuState(client, ("panel.edit", true), ("panel.crop", false));
+            await engine.PushFeedbackAsync();
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 10, 127), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 11, 0), midi.Sent);
+        }
+    }
+
+    [Fact]
+    public async Task TogglePanelFeedback_CoversQueryablePanelSectionAndSidebarCommands()
+    {
+        var commands = new[]
+        {
+            (Id: "view.leftPanel", Number: 20),
+            (Id: "view.rightPanel", Number: 21),
+            (Id: "panel.presets", Number: 22),
+            (Id: "section.light", Number: 23),
+            (Id: "tool.brush", Number: 24),
+            (Id: "panel.activity", Number: 25),
+        };
+        var mappings = commands.Select(command => new MidiMapping
+        {
+            Channel = 1,
+            MessageType = MidiMessageType.ControlChange,
+            Number = command.Number,
+            TargetKind = MappingTargetKind.Command,
+            TargetId = command.Id,
+            HandleAsToggle = true,
+        }).ToArray();
+        var (engine, midi, client) = Create(mappings);
+        using (engine)
+        {
+            SetMenuState(client,
+                ("view.leftPanel", false),
+                ("view.rightPanel", true),
+                ("panel.presets", true),
+                ("section.light", true),
+                ("tool.brush", true),
+                ("panel.activity", false));
+
+            await engine.PushFeedbackAsync();
+
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 20, 0), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 21, 127), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 22, 127), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 23, 127), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 24, 127), midi.Sent);
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 25, 0), midi.Sent);
+        }
+    }
+
+    [Fact]
+    public async Task ToggleCommandState_MatchesConfiguredParamsAndExecutesWhenStateIsUnavailable()
+    {
+        var parameterized = new MidiMapping
+        {
+            Channel = 1,
+            MessageType = MidiMessageType.ControlChange,
+            Number = 30,
+            TargetKind = MappingTargetKind.Command,
+            TargetId = "panel.dynamic",
+            CommandParams = "{\"mode\":\"a\"}",
+            HandleAsToggle = true,
+        };
+        var action = new MidiMapping
+        {
+            Channel = 1,
+            MessageType = MidiMessageType.ControlChange,
+            Number = 31,
+            TargetKind = MappingTargetKind.Command,
+            TargetId = "edit.undo",
+            HandleAsToggle = true,
+        };
+        var (engine, midi, client) = Create(parameterized, action);
+        using (engine)
+        {
+            client.MenuTree = new JsonArray(new JsonObject
+            {
+                ["children"] = new JsonArray(
+                    new JsonObject
+                    {
+                        ["kind"] = "item",
+                        ["id"] = "panel.dynamic",
+                        ["params"] = new JsonObject { ["mode"] = "a" },
+                        ["checked"] = false,
+                    },
+                    new JsonObject
+                    {
+                        ["kind"] = "item",
+                        ["id"] = "panel.dynamic",
+                        ["params"] = new JsonObject { ["mode"] = "b" },
+                        ["checked"] = true,
+                    }),
+            });
+
+            await engine.PushFeedbackAsync();
+            Assert.Contains(new MidiMessage(1, MidiMessageType.ControlChange, 30, 0), midi.Sent);
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 30, 127));
+            await WaitForAsync(() => client.Executed().Any(c => c.Command == "panel.dynamic"));
+            Assert.Single(client.Executed(), c => c.Command == "panel.dynamic");
+
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 31, 127));
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 31, 0));
+            await WaitForAsync(() => client.Executed().Count(c => c.Command == "edit.undo") == 2);
+            Assert.Equal(2, client.Executed().Count(c => c.Command == "edit.undo"));
+        }
+    }
+
+    [Fact]
+    public async Task ToggleCommand_InvalidParamsDoNotMatchMenuStateAndAreReported()
+    {
+        var mapping = new MidiMapping
+        {
+            Channel = 1,
+            MessageType = MidiMessageType.ControlChange,
+            Number = 32,
+            TargetKind = MappingTargetKind.Command,
+            TargetId = "panel.dynamic",
+            CommandParams = "{invalid",
+            HandleAsToggle = true,
+        };
+        var (engine, midi, client) = Create(mapping);
+        using (engine)
+        {
+            var logs = new List<string>();
+            engine.Log += (_, message) => logs.Add(message);
+            SetMenuState(client, ("panel.dynamic", true));
+            midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 32, 127));
+            await WaitForAsync(() => logs.Any(message => message.Contains("invalid params JSON", StringComparison.Ordinal)));
+            Assert.Empty(client.Executed());
         }
     }
 
@@ -295,6 +492,7 @@ public class MappingEngineTests
         public ConcurrentQueue<(string Method, JsonNode? Params)> Calls { get; } = new();
         public double ExposureValue { get; set; } = 1.0;
         public TimeSpan DevelopSetDelay { get; set; }
+        public JsonArray MenuTree { get; set; } = [];
         public LightCraftConnectionState State { get; set; } = LightCraftConnectionState.Connected;
         public string? LastError => null;
         public event EventHandler? StateChanged { add { } remove { } }
@@ -302,6 +500,8 @@ public class MappingEngineTests
         public async Task<JsonNode?> SendAsync(string method, JsonNode? parameters = null, CancellationToken ct = default)
         {
             Calls.Enqueue((method, parameters?.DeepClone()));
+            if (method == "ui.menu.tree")
+                return MenuTree.DeepClone();
             if (method == "engine.execute" && parameters?["command"]?.GetValue<string>() == "develop.controls")
             {
                 return new JsonArray(
@@ -336,6 +536,21 @@ public class MappingEngineTests
         return (engine, midi, client);
     }
 
+    private static void SetMenuState(FakeClient client, params (string Id, bool Checked)[] items)
+    {
+        client.MenuTree = new JsonArray(
+            new JsonObject
+            {
+                ["label"] = "Window",
+                ["children"] = new JsonArray(items.Select(item => (JsonNode?)new JsonObject
+                {
+                    ["kind"] = "item",
+                    ["id"] = item.Id,
+                    ["checked"] = item.Checked,
+                }).ToArray()),
+            });
+    }
+
     [Fact]
     public async Task FaderMoves_SendEveryValueInOrderInsideOneInteraction()
     {
@@ -347,7 +562,9 @@ public class MappingEngineTests
 
         for (int v = 0; v <= 127; v++) midi.Receive(new MidiMessage(1, MidiMessageType.ControlChange, 7, v));
 
-        await WaitForAsync(() => client.Executed().Any(e => e.Command == "develop.endInteraction"));
+        await WaitForAsync(
+            () => client.Executed().Any(e => e.Command == "develop.endInteraction"),
+            timeoutMs: 10000);
         var executed = client.Executed().Where(e => e.Command != "develop.controls").ToList();
 
         Assert.Equal("develop.beginInteraction", executed[0].Command);

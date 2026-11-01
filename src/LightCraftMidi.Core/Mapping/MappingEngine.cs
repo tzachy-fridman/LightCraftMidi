@@ -34,12 +34,13 @@ public sealed class MappingEngine : IDisposable
     private readonly ConcurrentDictionary<string, long> _lastTouch = new();
     private readonly ConcurrentDictionary<Guid, int> _lastFeedback = new();
     private readonly ConcurrentDictionary<Guid, bool> _resetButtonPressed = new();
-    private readonly ConcurrentDictionary<Guid, bool> _toggleProfileButtonPressed = new();
+    private readonly ConcurrentDictionary<Guid, bool> _toggleMappingPressed = new();
     private readonly ConcurrentQueue<PendingValue> _pendingValues = new();
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly CancellationTokenSource _cts = new();
     private volatile MidiMapping[] _mappings = [];
     private volatile MidiMapping[] _profileButtons = [];
+    private string? _activeProfile;
     private Task? _senderTask;
     private Task? _feedbackTask;
     private bool _inInteraction;
@@ -75,8 +76,14 @@ public sealed class MappingEngine : IDisposable
     public void SetProfileButtons(IEnumerable<MidiMapping> buttons)
     {
         _profileButtons = buttons.Select(m => m.Clone()).ToArray();
-        _toggleProfileButtonPressed.Clear();
+        _toggleMappingPressed.Clear();
         ResetFeedback();
+    }
+
+    public void SetActiveProfile(string profileName)
+    {
+        _activeProfile = profileName;
+        SendProfileButtonFeedback(profileName);
     }
 
     private static bool SourcesOverlap(MidiMapping a, MidiMapping b) =>
@@ -97,6 +104,7 @@ public sealed class MappingEngine : IDisposable
         _mappings = mappings.Select(m => m.Clone()).ToArray();
         _pendingValues.Clear();
         _resetButtonPressed.Clear();
+        _toggleMappingPressed.Clear();
         ResetFeedback();
     }
 
@@ -201,20 +209,21 @@ public sealed class MappingEngine : IDisposable
         {
             MessageObserved?.Invoke(this, new MidiObservation(m, buttons, false, DateTime.Now));
             var button = buttons[0];
-            if (button.ToggleProfileButton)
+            if (button.HandleAsToggle)
             {
+                _lastFeedback.TryRemove(button.Id, out _);
                 bool pressed = m.Value > 0;
-                bool wasPressed = _toggleProfileButtonPressed.TryGetValue(button.Id, out var previous) && previous;
-                _toggleProfileButtonPressed[button.Id] = pressed;
+                bool wasPressed = _toggleMappingPressed.TryGetValue(button.Id, out var previous) && previous;
+                _toggleMappingPressed[button.Id] = pressed;
                 if (pressed && !wasPressed)
                 {
-                    foreach (var other in _profileButtons.Where(x => x.ToggleProfileButton && x.Id != button.Id))
-                    {
-                        _toggleProfileButtonPressed[other.Id] = false;
-                        if (other.HasSource && other.MessageType != MidiMessageType.PitchBend)
-                            _midi.Send(new MidiMessage(other.Channel <= 0 ? m.Channel : other.Channel, other.MessageType, other.Number, 0));
-                    }
+                    _activeProfile = button.TargetId;
+                    SendProfileButtonFeedback(button.TargetId, m.Channel);
                     ProfileRequested?.Invoke(this, button.TargetId);
+                }
+                else if (!pressed && string.Equals(button.TargetId, _activeProfile, StringComparison.OrdinalIgnoreCase))
+                {
+                    SendProfileButtonFeedback(button.TargetId, m.Channel);
                 }
             }
             else if (button.Trigger == CommandTrigger.OnAnyChange || m.Value > 0)
@@ -254,6 +263,16 @@ public sealed class MappingEngine : IDisposable
                     break;
 
                 case MappingTargetKind.Command:
+                    if (mapping.HandleAsToggle)
+                    {
+                        _lastFeedback.TryRemove(mapping.Id, out _);
+                        bool pressed = m.Value > 0;
+                        bool wasPressed = _toggleMappingPressed.TryGetValue(mapping.Id, out var previous) && previous;
+                        _toggleMappingPressed[mapping.Id] = pressed;
+                        if (pressed == wasPressed) continue;
+                        _ = ExecuteToggleCommandAsync(mapping, pressed);
+                        break;
+                    }
                     if (mapping.Trigger == CommandTrigger.OnPress && m.Value == 0) continue;
                     _ = ExecuteCommandAsync(mapping);
                     break;
@@ -292,6 +311,29 @@ public sealed class MappingEngine : IDisposable
         catch (Exception ex) when (ex is LightCraftException or OperationCanceledException)
         {
             Log?.Invoke(this, $"{mapping.TargetId}: {ex.Message}");
+        }
+    }
+
+    private async Task ExecuteToggleCommandAsync(MidiMapping mapping, bool desiredState)
+    {
+        if (_lc.State != LightCraftConnectionState.Connected) return;
+        try
+        {
+            bool? actualState = await GetCommandCheckedStateAsync(mapping, _cts.Token).ConfigureAwait(false);
+            if (actualState.HasValue)
+            {
+                if (actualState.Value == desiredState)
+                {
+                    SendToggleMappingFeedback(mapping, actualState.Value);
+                    return;
+                }
+            }
+
+            await ExecuteCommandAsync(mapping).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is LightCraftException or OperationCanceledException)
+        {
+            Log?.Invoke(this, $"{mapping.TargetId}: could not check command state ({ex.Message})");
         }
     }
 
@@ -387,46 +429,141 @@ public sealed class MappingEngine : IDisposable
         }
     }
 
+    private void SendProfileButtonFeedback(string activeProfile, int? inputChannel = null)
+    {
+        foreach (var button in _profileButtons.Where(x => x.HandleAsToggle && x.HasSource
+                     && x.MessageType != MidiMessageType.PitchBend))
+        {
+            bool isActive = string.Equals(button.TargetId, activeProfile, StringComparison.OrdinalIgnoreCase);
+            if (!_midi.IsOutputOpen) continue;
+
+            int channel = button.Channel > 0 ? button.Channel : inputChannel ?? 1;
+            int value = isActive ? MidiMessage.MaxValueFor(button.MessageType) : 0;
+            _midi.Send(new MidiMessage(channel, button.MessageType, button.Number, value));
+        }
+    }
+
     /// <summary>Reads current develop values and sends changed ones to the MIDI output.</summary>
     public async Task PushFeedbackAsync(CancellationToken ct = default)
     {
         if (!FeedbackEnabled || !_midi.IsOutputOpen || _lc.State != LightCraftConnectionState.Connected) return;
         var buttons = _profileButtons;
+        var toggleMappings = _mappings.Where(m => m.HandleAsToggle && m.HasTarget && m.HasSource
+            && m.TargetKind == MappingTargetKind.Command && m.MessageType != MidiMessageType.PitchBend).ToArray();
         var feedbackMappings = _mappings.Where(m => m.Feedback && m.HasTarget && m.TargetKind == MappingTargetKind.DevelopControl && m.HasSource
             && !buttons.Any(b => b.HasSource && b.HasTarget && SourcesOverlap(b, m))
             && !_mappings.Any(b => b.TargetKind == MappingTargetKind.ResetControl &&
                                    b.HasSource && b.HasTarget && SourcesOverlap(b, m))).ToArray();
-        if (feedbackMappings.Length == 0) return;
+        if (feedbackMappings.Length == 0 && toggleMappings.Length == 0) return;
 
         var now = Environment.TickCount64;
-        if (feedbackMappings.Any(mapping =>
+        bool controlsOnHold = feedbackMappings.Length > 0 && feedbackMappings.Any(mapping =>
                 _lastTouch.TryGetValue(mapping.TargetId, out var touched) &&
-                now - touched < TouchHold.TotalMilliseconds))
+                now - touched < TouchHold.TotalMilliseconds);
+        if (controlsOnHold)
         {
             Trace(MappingLogLevel.Trace, "Feedback poll skipped: mapped control is being moved");
-            return;
+        }
+        else if (feedbackMappings.Length > 0)
+        {
+            var controls = await _lc.GetControlsAsync(ct).ConfigureAwait(false);
+            UpdateControls(controls);
         }
 
-        var controls = await _lc.GetControlsAsync(ct).ConfigureAwait(false);
-        UpdateControls(controls);
-
-        foreach (var mapping in feedbackMappings)
+        if (!controlsOnHold)
         {
-            if (!_controls.TryGetValue(mapping.TargetId, out var c) || c.Value is not { } value) continue;
-            int maxRaw = MidiMessage.MaxValueFor(mapping.MessageType);
-            int raw = ValueScaler.ToMidi(value, maxRaw, mapping, c);
-            bool changed = !_lastFeedback.TryGetValue(mapping.Id, out var last) || last != raw;
-            _lastFeedback[mapping.Id] = raw;
-            if (!changed)
+            foreach (var mapping in feedbackMappings)
             {
-                Trace(MappingLogLevel.Trace, $"Feedback {mapping.TargetId}={Format(value)} -> MIDI unchanged ({raw}/{maxRaw})");
-                continue;
+                if (!_controls.TryGetValue(mapping.TargetId, out var c) || c.Value is not { } value) continue;
+                int maxRaw = MidiMessage.MaxValueFor(mapping.MessageType);
+                int raw = ValueScaler.ToMidi(value, maxRaw, mapping, c);
+                bool changed = !_lastFeedback.TryGetValue(mapping.Id, out var last) || last != raw;
+                _lastFeedback[mapping.Id] = raw;
+                if (!changed)
+                {
+                    Trace(MappingLogLevel.Trace, $"Feedback {mapping.TargetId}={Format(value)} -> MIDI unchanged ({raw}/{maxRaw})");
+                    continue;
+                }
+                var message = new MidiMessage(mapping.Channel == 0 ? 1 : mapping.Channel, mapping.MessageType, Math.Max(0, mapping.Number), raw);
+                _midi.Send(message);
+                Trace(MappingLogLevel.Debug, $"Feedback {mapping.TargetId}={Format(value)} -> {message}");
             }
-            var message = new MidiMessage(mapping.Channel == 0 ? 1 : mapping.Channel, mapping.MessageType, Math.Max(0, mapping.Number), raw);
-            _midi.Send(message);
-            Trace(MappingLogLevel.Debug, $"Feedback {mapping.TargetId}={Format(value)} -> {message}");
+        }
+
+        if (toggleMappings.Length > 0)
+        {
+            var menuTree = await _lc.SendAsync("ui.menu.tree", null, ct).ConfigureAwait(false);
+            foreach (var mapping in toggleMappings)
+            {
+                if (!TryParseCommandParams(mapping.CommandParams, out var parameters)) continue;
+                var state = FindCommandCheckedState(menuTree, mapping.TargetId, parameters);
+                if (state.HasValue) SendToggleMappingFeedback(mapping, state.Value);
+            }
         }
     }
+
+    private void SendToggleMappingFeedback(MidiMapping mapping, bool isActive)
+    {
+        if (!_midi.IsOutputOpen) return;
+        int value = isActive ? MidiMessage.MaxValueFor(mapping.MessageType) : 0;
+        bool changed = !_lastFeedback.TryGetValue(mapping.Id, out var last) || last != value;
+        _lastFeedback[mapping.Id] = value;
+        if (!changed) return;
+
+        var message = new MidiMessage(mapping.Channel == 0 ? 1 : mapping.Channel, mapping.MessageType, mapping.Number, value);
+        _midi.Send(message);
+        Trace(MappingLogLevel.Debug, $"Panel feedback {mapping.TargetId}={(isActive ? "active" : "inactive")} -> {message}");
+    }
+
+    private async Task<bool?> GetCommandCheckedStateAsync(MidiMapping mapping, CancellationToken ct)
+    {
+        if (!TryParseCommandParams(mapping.CommandParams, out var parameters)) return null;
+        var tree = await _lc.SendAsync("ui.menu.tree", null, ct).ConfigureAwait(false);
+        return FindCommandCheckedState(tree, mapping.TargetId, parameters);
+    }
+
+    private static bool TryParseCommandParams(string? commandParams, out JsonNode? parameters)
+    {
+        parameters = null;
+        if (string.IsNullOrWhiteSpace(commandParams)) return true;
+        try
+        {
+            parameters = JsonNode.Parse(commandParams);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool? FindCommandCheckedState(JsonNode? menuTree, string commandId, JsonNode? commandParams)
+    {
+        var matches = new List<bool>();
+        CollectCheckedStates(menuTree, commandId, commandParams, matches);
+        return matches.Count > 0 && matches.All(value => value == matches[0]) ? matches[0] : null;
+    }
+
+    private static void CollectCheckedStates(JsonNode? node, string commandId, JsonNode? commandParams, List<bool> matches)
+    {
+        if (node is JsonArray array)
+        {
+            foreach (var child in array) CollectCheckedStates(child, commandId, commandParams, matches);
+            return;
+        }
+        if (node is not JsonObject obj) return;
+        if (StringComparer.Ordinal.Equals(JsonString(obj["id"]), commandId)
+            && obj["checked"] is JsonValue checkedValue
+            && checkedValue.TryGetValue<bool>(out var isChecked)
+            && JsonNode.DeepEquals(commandParams, obj["params"]))
+        {
+            matches.Add(isChecked);
+        }
+        if (obj["children"] is JsonNode children) CollectCheckedStates(children, commandId, commandParams, matches);
+    }
+
+    private static string? JsonString(JsonNode? value) =>
+        value is JsonValue json && json.TryGetValue<string>(out var result) ? result : null;
 
     private void SendFeedbackForControl(string controlId, double value)
     {

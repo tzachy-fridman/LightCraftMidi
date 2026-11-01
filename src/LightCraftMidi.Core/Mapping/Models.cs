@@ -1,5 +1,6 @@
 using LightCraftMidi.Core.LightCraft;
 using LightCraftMidi.Core.Midi;
+using System.Text.Json.Serialization;
 
 namespace LightCraftMidi.Core.Mapping;
 
@@ -34,7 +35,11 @@ public sealed class MidiMapping
     public MidiMessageType MessageType { get; set; } = MidiMessageType.ControlChange;
     /// <summary>CC or note number; -1 while unassigned.</summary>
     public int Number { get; set; } = -1;
-    public bool ToggleProfileButton { get; set; }
+    public bool HandleAsToggle { get; set; }
+
+    [JsonPropertyName("toggleProfileButton")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool LegacyToggleProfileButton { get => false; set { if (value) HandleAsToggle = true; } }
 
     public MappingTargetKind TargetKind { get; set; } = MappingTargetKind.DevelopControl;
     public string TargetId { get; set; } = "";

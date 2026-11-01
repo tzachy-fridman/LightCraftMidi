@@ -55,6 +55,7 @@ public sealed class AppHost : IAsyncDisposable
         Engine.FeedbackEnabled = profile.FeedbackEnabled;
         UpdateMappings();
         Midi.SelectDevices(profile.MidiInput, profile.MidiOutput);
+        Engine.SetActiveProfile(profile.Name);
         Store.SaveSettings(Settings);
     }
 

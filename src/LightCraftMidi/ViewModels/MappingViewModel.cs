@@ -46,7 +46,7 @@ public sealed partial class MappingViewModel : ObservableObject
     public double? RangeMax { get => Model.RangeMax; set => Set(Model.RangeMax, value, v => Model.RangeMax = v); }
     public bool Feedback { get => Model.Feedback; set => Set(Model.Feedback, value, v => Model.Feedback = v); }
     public CommandTrigger Trigger { get => Model.Trigger; set => Set(Model.Trigger, value, v => Model.Trigger = v); }
-    public bool ToggleProfileButton { get => Model.ToggleProfileButton; set => Set(Model.ToggleProfileButton, value, v => Model.ToggleProfileButton = v); }
+    public bool HandleAsToggle { get => Model.HandleAsToggle; set => Set(Model.HandleAsToggle, value, v => Model.HandleAsToggle = v); }
     public string? CommandParams { get => Model.CommandParams; set => Set(Model.CommandParams, string.IsNullOrWhiteSpace(value) ? null : value, v => Model.CommandParams = v); }
 
     public string SourceText => IsLearning ? "Move a control…" : Model.HasSource ? Model.SourceText : "(not assigned)";

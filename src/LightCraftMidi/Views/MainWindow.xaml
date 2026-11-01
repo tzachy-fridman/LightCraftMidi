@@ -354,10 +354,10 @@
                                 <TextBlock Text="Params (JSON)" VerticalAlignment="Center" Margin="10,0,4,0" Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
                                 <TextBox MinWidth="180" FontFamily="Consolas" Text="{Binding CommandParams, UpdateSourceTrigger=LostFocus}" Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
-                            <CheckBox Content="Toggle profile button (turns other toggle profile buttons off)"
-                                      IsChecked="{Binding ToggleProfileButton}"
-                                      Visibility="{Binding IsProfileSwitch, Converter={StaticResource BoolToVis}}"
-                                      ToolTip="Use a controller button configured as a toggle. A press that turns it on loads this profile and sends MIDI-off to other toggle profile buttons." />
+                            <CheckBox Content="Handle as Toggle"
+                                      IsChecked="{Binding HandleAsToggle}"
+                                      Visibility="{Binding IsTriggerTarget, Converter={StaticResource BoolToVis}}"
+                                      ToolTip="Run commands on both button state changes. When LightCraft reports a command's checked state in its menu API, the app syncs feedback and only runs the command when needed." />
                             <TextBlock Text="{Binding ParamsHint}" Style="{StaticResource Hint}"
                                        Visibility="{Binding ShowParams, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>

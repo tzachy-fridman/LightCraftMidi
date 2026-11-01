@@ -147,7 +147,7 @@ public class ProfileStoreTests : IDisposable
             Mappings =
             [
                 new MidiMapping { Channel = 11, MessageType = MidiMessageType.ControlChange, Number = 1, TargetId = "light.exposure", RangeMin = -2, Invert = true },
-                new MidiMapping { Channel = 1, MessageType = MidiMessageType.ControlChange, Number = 10, TargetKind = MappingTargetKind.LoadProfile, TargetId = "Editing", ToggleProfileButton = true },
+                new MidiMapping { Channel = 1, MessageType = MidiMessageType.ControlChange, Number = 10, TargetKind = MappingTargetKind.LoadProfile, TargetId = "Editing", HandleAsToggle = true },
                 new MidiMapping { MessageType = MidiMessageType.Note, Number = 8, TargetKind = MappingTargetKind.Command, TargetId = "photo.rate", CommandParams = "{\"rating\":4}" },
             ],
         };
@@ -162,11 +162,27 @@ public class ProfileStoreTests : IDisposable
         Assert.Equal(-2, p.Mappings[0].RangeMin);
         Assert.True(p.Mappings[0].Invert);
         Assert.Equal(MappingTargetKind.LoadProfile, p.Mappings[1].TargetKind);
-        Assert.True(p.Mappings[1].ToggleProfileButton);
+        Assert.True(p.Mappings[1].HandleAsToggle);
         Assert.Equal(MappingTargetKind.Command, p.Mappings[2].TargetKind);
         Assert.Equal("{\"rating\":4}", p.Mappings[2].CommandParams);
         Assert.Equal(7999, reloaded.LoadSettings().Port);
         Assert.Equal(MappingLogLevel.Warning, reloaded.LoadSettings().LogLevel);
+    }
+
+    [Fact]
+    public void LoadProfile_LegacyToggleProfileButtonSettingAsHandleAsToggle()
+    {
+        var store = new ProfileStore(_dir);
+        File.WriteAllText(Path.Combine(store.ProfilesDirectory, "Legacy.json"),
+            """{"name":"Legacy","mappings":[{"toggleProfileButton":true}]}""");
+
+        var profile = Assert.Single(store.LoadProfiles());
+        Assert.True(profile.Mappings[0].HandleAsToggle);
+
+        store.SaveProfile(profile);
+        var savedJson = File.ReadAllText(Path.Combine(store.ProfilesDirectory, "Legacy.json"));
+        Assert.Contains("\"handleAsToggle\": true", savedJson);
+        Assert.DoesNotContain("\"toggleProfileButton\"", savedJson);
     }
 
     [Fact]

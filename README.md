@@ -134,11 +134,14 @@ receive no slider feedback, and continue working while LightCraft mapping is pau
 or disconnected. MIDI Learn captures the button without switching profiles.
 
 For hardware buttons configured to send their latched on/off state (for example with
-the X-Touch Editor), enable **Toggle profile button** on that profile mapping. The app
-loads the profile only when the MIDI state changes from off to on, then sends a
-zero/off message to the other toggle profile buttons when a MIDI output is configured.
-This option is independent of the controller's button mode and is off by default.
-Conflicting profile-switch sources are flagged; the first assignment wins.
+the X-Touch Editor), enable **Handle as Toggle**. Profile mappings load only on the
+off-to-on transition and send MIDI feedback to keep the active profile button on and
+other toggle profile buttons off. For command mappings, each MIDI state edge is reconciled against the
+command's `checked` state in LightCraft's `ui.menu.tree` response when available.
+This keeps panel buttons synchronized with changes made directly in LightCraft and
+avoids running a toggle command when its requested state is already active. Commands
+without a reported checked state run on both MIDI state edges and have no state feedback.
+This option is off by default.
 
 Buttons listen on the active profile's selected MIDI input. Keep the same input in
 profiles you want to switch between using one controller.
